@@ -302,12 +302,56 @@ async function main() {
       if (!c) return null;
       __qa.click(c);
       __qa.click(__qa.pad(1));
-      return { r: Number(c.dataset.r), c: Number(c.dataset.c), text: __qa.num(c), wrong: c.classList.contains('wrong'), mistakes: Number(document.getElementById('mistakes').textContent) };
+      return { r: Number(c.dataset.r), c: Number(c.dataset.c), text: __qa.num(c), conflict: c.classList.contains('conflict'), mistakes: Number(document.getElementById('mistakes').textContent) };
     })()`);
     ok(!!inputResult && inputResult.text === '1', '浏览器中点击数字键盘可填入数字');
-    ok(!!inputResult && (inputResult.wrong ? inputResult.mistakes === 1 : inputResult.mistakes === 0), '错误计数与填入结果一致');
+    ok(!!inputResult && (inputResult.conflict ? inputResult.mistakes === 1 : inputResult.mistakes === 0), '冲突标红与错误计数一致');
     await evaluate('__qa.key("Backspace")');
     ok((await evaluate('__qa.cell(' + inputResult.r + ',' + inputResult.c + ').querySelector(".num").textContent')) === '', 'Backspace 可擦除填入的数字');
+
+    console.log('\n[4×4 冲突标红]');
+    const conflictInfo = await evaluate(`(() => {
+      const all = Array.from(document.querySelectorAll('#board .cell'));
+      const empty = all.find(function (c) { return !c.classList.contains('given') && !c.querySelector('.num').textContent; });
+      if (!empty) return null;
+      const er = Number(empty.dataset.r);
+      const ec = Number(empty.dataset.c);
+      const boxR = Math.floor(er / 2) * 2;
+      const boxC = Math.floor(ec / 2) * 2;
+      const peers = [];
+      for (let i = 0; i < 4; i++) { peers.push([er, i]); peers.push([i, ec]); }
+      for (let r = boxR; r < boxR + 2; r++) for (let c = boxC; c < boxC + 2; c++) peers.push([r, c]);
+      for (let i = 0; i < peers.length; i++) {
+        const pr = peers[i][0];
+        const pc = peers[i][1];
+        if (pr === er && pc === ec) continue;
+        const cell = __qa.cell(pr, pc);
+        const value = cell && cell.querySelector('.num').textContent;
+        if (value) {
+          __qa.click(empty);
+          __qa.click(__qa.pad(Number(value)));
+          return {
+            r: er, c: ec,
+            emptyConflict: empty.classList.contains('conflict'),
+            peerConflict: cell.classList.contains('conflict'),
+            mistakes: Number(document.getElementById('mistakes').textContent)
+          };
+        }
+      }
+      return null;
+    })()`);
+    if (conflictInfo) {
+      ok(conflictInfo.emptyConflict && conflictInfo.peerConflict, '冲突时新填格与已有数字格都标红');
+      ok(conflictInfo.mistakes === 1, '冲突错误计数为 1');
+      report.screenshots.push(await screenshot('browser-conflict.png'));
+      await evaluate('__qa.key("Backspace")');
+      const conflictAfterErase = await evaluate(
+        '(() => { const c = __qa.cell(' + conflictInfo.r + ',' + conflictInfo.c + '); return c.classList.contains("conflict"); })()'
+      );
+      ok(!conflictAfterErase, '擦除后冲突标红消失');
+    } else {
+      ok(false, '未能构造 4×4 冲突场景');
+    }
     report.screenshots.push(await screenshot('browser-4x4.png'));
 
     console.log('\n[暂停浮层]');

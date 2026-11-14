@@ -94,6 +94,76 @@ async function main() {
   press('Backspace');
   eq(numOf(empty), '', 'Backspace 擦除数字');
 
+  console.log('\n[2b] 冲突标红只依据行/列/宫的重复数字');
+  const valueOf = (cell) => Number(numOf(cell) || 0);
+  const boxOf9 = (r, c) => Math.floor(r / 3) * 3 + Math.floor(c / 3);
+  let conflictCase = null;
+  for (const givenCell of Array.from(document.querySelectorAll('#board .cell.given'))) {
+    const givenValue = valueOf(givenCell);
+    const gr = Number(givenCell.dataset.r);
+    const gc = Number(givenCell.dataset.c);
+    for (const candidate of Array.from(document.querySelectorAll('#board .cell:not(.given)'))) {
+      if (valueOf(candidate)) continue;
+      const cr = Number(candidate.dataset.r);
+      const cc = Number(candidate.dataset.c);
+      if (cr === gr || cc === gc || boxOf9(cr, cc) === boxOf9(gr, gc)) {
+        conflictCase = { givenCell, givenValue, cell: candidate };
+        break;
+      }
+    }
+    if (conflictCase) break;
+  }
+  ok(!!conflictCase, '找到与题目数字同行/列/宫的空格');
+  if (conflictCase) {
+    const mistakesBefore = mistakesCount();
+    click(conflictCase.cell);
+    click(document.querySelector('#pad .pad-btn[data-d="' + conflictCase.givenValue + '"]'));
+    ok(conflictCase.cell.classList.contains('conflict'), '与同行/列/宫已有数字重复的新格子标红');
+    ok(conflictCase.givenCell.classList.contains('conflict'), '发生冲突的题目格子也标红');
+    eq(mistakesCount(), mistakesBefore + 1, '冲突时错误计数 +1');
+    press('Backspace');
+    ok(!conflictCase.cell.classList.contains('conflict') && !conflictCase.givenCell.classList.contains('conflict'), '擦除后冲突标红消失');
+  }
+
+  const usedDigitsAt = (r, c) => {
+    const used = new Set();
+    for (let i = 0; i < 9; i++) {
+      const rowValue = valueOf(cellAt(r, i));
+      const colValue = valueOf(cellAt(i, c));
+      if (rowValue) used.add(rowValue);
+      if (colValue) used.add(colValue);
+    }
+    const br = Math.floor(r / 3) * 3;
+    const bc = Math.floor(c / 3) * 3;
+    for (let rr = br; rr < br + 3; rr++) {
+      for (let cc = bc; cc < bc + 3; cc++) {
+        const v = valueOf(cellAt(rr, cc));
+        if (v) used.add(v);
+      }
+    }
+    return used;
+  };
+  let freePlacement = null;
+  for (const candidate of Array.from(document.querySelectorAll('#board .cell:not(.given)'))) {
+    if (valueOf(candidate)) continue;
+    const used = usedDigitsAt(Number(candidate.dataset.r), Number(candidate.dataset.c));
+    for (let d = 1; d <= 9; d++) {
+      if (!used.has(d)) {
+        freePlacement = { cell: candidate, digit: d };
+        break;
+      }
+    }
+    if (freePlacement) break;
+  }
+  ok(!!freePlacement, '找到不会产生冲突的空格与数字');
+  if (freePlacement) {
+    click(freePlacement.cell);
+    click(document.querySelector('#pad .pad-btn[data-d="' + freePlacement.digit + '"]'));
+    ok(!freePlacement.cell.classList.contains('conflict'), '不冲突的数字不会被标红');
+    press('Backspace');
+    eq(numOf(freePlacement.cell), '', '测试后擦除数字');
+  }
+
   console.log('\n[3] 提示 + 撤销');
   const beforeHint = hintsCount();
   click($('hintBtn'));

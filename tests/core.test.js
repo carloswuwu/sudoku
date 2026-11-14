@@ -75,6 +75,70 @@ function testUnsolvedUniquenessBasics() {
   }
 }
 
+function testConflictDetection() {
+  // 行冲突
+  let grid = Core.emptyGrid(9);
+  grid[0][0] = 5;
+  grid[0][7] = 5;
+  let conflicts = Core.findConflicts(grid, 9);
+  check(conflicts.has('0:0') && conflicts.has('0:7'), '同行重复应标记两个格子');
+  check(conflicts.size === 2, '同行重复只影响这两个格子');
+
+  // 列冲突
+  grid = Core.emptyGrid(9);
+  grid[2][3] = 7;
+  grid[7][3] = 7;
+  conflicts = Core.findConflicts(grid, 9);
+  check(conflicts.has('2:3') && conflicts.has('7:3'), '同列重复应标记两个格子');
+
+  // 宫冲突（9×9：3×3 宫）
+  grid = Core.emptyGrid(9);
+  grid[0][0] = 4;
+  grid[2][2] = 4;
+  conflicts = Core.findConflicts(grid, 9);
+  check(conflicts.has('0:0') && conflicts.has('2:2'), '同宫重复应标记两个格子');
+
+  // 6×6 宫是 2 行 × 3 列：(0,0) 与 (1,2) 同宫
+  grid = Core.emptyGrid(6);
+  grid[0][0] = 2;
+  grid[1][2] = 2;
+  conflicts = Core.findConflicts(grid, 6);
+  check(conflicts.has('0:0') && conflicts.has('1:2'), '6×6 同宫重复应标记');
+
+  // 4×4 宫是 2×2：(0,0) 与 (1,1) 同宫
+  grid = Core.emptyGrid(4);
+  grid[0][0] = 3;
+  grid[1][1] = 3;
+  conflicts = Core.findConflicts(grid, 4);
+  check(conflicts.has('0:0') && conflicts.has('1:1'), '4×4 同宫重复应标记');
+
+  // 三个重复数字应全部标记
+  grid = Core.emptyGrid(9);
+  grid[4][0] = 8;
+  grid[4][3] = 8;
+  grid[4][8] = 8;
+  conflicts = Core.findConflicts(grid, 9);
+  check(conflicts.size === 3, '一行三个重复数字应全部标记');
+
+  // 一行里各不相同的数字不算冲突
+  grid = Core.emptyGrid(9);
+  for (let c = 0; c < 9; c++) grid[0][c] = c + 1;
+  check(Core.findConflicts(grid, 9).size === 0, '一行数字各不相同时没有冲突');
+
+  // 完整合法终盘和合法残局都没有冲突
+  for (const size of SIZES) {
+    const solution = Core.generateSolved(size);
+    check(Core.findConflicts(solution, size).size === 0, `${size}×${size} 合法终盘没有冲突`);
+    const partial = Core.cloneGrid(solution);
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if ((r + c) % 3 !== 0) partial[r][c] = 0;
+      }
+    }
+    check(Core.findConflicts(partial, size).size === 0, `${size}×${size} 合法残局没有冲突`);
+  }
+}
+
 function testGeneration() {
   for (const size of SIZES) {
     for (const difficulty of DIFFICULTIES) {
@@ -127,6 +191,7 @@ function testDifficultyOrdering() {
 
 console.log('Sudoku 核心逻辑测试');
 testUnsolvedUniquenessBasics();
+testConflictDetection();
 testGeneration();
 testDeterministicSeed();
 testDifficultyOrdering();

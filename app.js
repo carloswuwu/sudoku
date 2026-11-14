@@ -446,6 +446,8 @@
       selVal = state.values[sel.r][sel.c];
       selBox = Core.boxIndex(sel.r, sel.c, n);
     }
+    /* 只根据行/列/宫规则找冲突，不参考题目答案 */
+    var conflicts = Core.findConflicts(state.values, n);
 
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
@@ -469,7 +471,7 @@
         }
 
         if (value) {
-          if (value !== state.solution[r][c]) classes.push('wrong');
+          if (conflicts.has(keyOf(r, c))) classes.push('conflict');
           else if (!isSelected && value === selVal) classes.push('same');
         }
 
@@ -478,7 +480,7 @@
         var label = '第 ' + (r + 1) + ' 行第 ' + (c + 1) + ' 列，';
         label += value ? '数字 ' + value : '空';
         if (given) label += '（题目）';
-        if (value && value !== state.solution[r][c]) label += '（错误）';
+        if (conflicts.has(keyOf(r, c))) label += '（与同行、同列或同宫的数字重复）';
         ref.el.setAttribute('aria-label', label);
 
         if (value !== 0) {
@@ -562,7 +564,7 @@
     var n = state.size;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
-        if (!state.puzzle[r][c] && state.values[r][c] !== state.solution[r][c]) {
+        if (!state.puzzle[r][c] && !state.values[r][c]) {
           state.selected = { r: r, c: c };
           renderBoard();
           return state.selected;
@@ -598,8 +600,9 @@
     state.notes[r][c].clear();
     state.hinted.delete(keyOf(r, c));
 
-    var isWrong = value !== state.solution[r][c];
-    if (isWrong) {
+    /* 是否与同行、同列或同宫的已有数字重复（只看规则，不看答案） */
+    var hasConflict = hasConflictingPeer(r, c, value);
+    if (hasConflict) {
       state.mistakes += 1;
     } else {
       clearPeerNotes(r, c, value);
@@ -612,7 +615,7 @@
     save();
     pulseCell(r, c);
 
-    if (!isWrong) checkCompletion();
+    if (!hasConflict) checkCompletion();
   }
 
   function toggleNote(r, c, digit) {
@@ -691,6 +694,14 @@
     });
   }
 
+  function hasConflictingPeer(r, c, value) {
+    var conflict = false;
+    forEachPeer(r, c, function (rr, cc) {
+      if (state.values[rr][cc] === value) conflict = true;
+    });
+    return conflict;
+  }
+
   function undo() {
     if (state.paused || state.completed) return;
     var snapshot = state.history.pop();
@@ -747,9 +758,11 @@
     var n = state.size;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
-        if (state.values[r][c] !== state.solution[r][c]) return false;
+        if (!state.values[r][c]) return false;
       }
     }
+    /* 填满且没有任何行/列/宫冲突，即为完成 */
+    if (Core.findConflicts(state.values, n).size > 0) return false;
     state.completed = true;
     state.paused = false;
     updatePauseUI();

@@ -18,7 +18,7 @@
   --violet: #818cf8;
   --given: #f1f5f9;
   --user: #5eead4;
-  --wrong: #fb7185;
+  --conflict: #fb7185;
   --hint: #fbbf24;
   --shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.9);
   --radius: 18px;
@@ -428,17 +428,17 @@ body::before {
   z-index: 2;
 }
 
-.cell.wrong {
-  color: var(--wrong);
+.cell.conflict {
+  color: var(--conflict);
   background: rgba(251, 113, 133, 0.12);
 }
 
-.cell.wrong.selected {
+.cell.conflict.selected {
   background: rgba(251, 113, 133, 0.2);
-  box-shadow: inset 0 0 0 2px var(--wrong);
+  box-shadow: inset 0 0 0 2px var(--conflict);
 }
 
-.cell.hinted:not(.wrong) {
+.cell.hinted:not(.conflict) {
   color: var(--hint);
 }
 
@@ -448,7 +448,7 @@ body::before {
   z-index: 3;
 }
 
-.cell:not(.given):not(.selected):not(.wrong):hover {
+.cell:not(.given):not(.selected):not(.conflict):hover {
   background: rgba(148, 163, 184, 0.11);
 }
 

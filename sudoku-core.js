@@ -145,6 +145,60 @@
   }
 
   /*
+   * 找出所有冲突格：同一行、同一列或同一宫内出现重复数字的格子。
+   * 返回 "r:c" 形式的 Set；没有冲突时返回空 Set。
+   * 只依据行/列/宫规则，不依赖题目答案。
+   */
+  function findConflicts(grid, size) {
+    var n = size;
+    var cfg = getConfig(n);
+    var conflicts = new Set();
+
+    function markUnit(cells) {
+      var byValue = {};
+      for (var i = 0; i < cells.length; i++) {
+        var r = cells[i][0];
+        var c = cells[i][1];
+        var v = grid[r][c];
+        if (!v) continue;
+        if (!byValue[v]) byValue[v] = [];
+        byValue[v].push([r, c]);
+      }
+      Object.keys(byValue).forEach(function (value) {
+        var positions = byValue[value];
+        if (positions.length > 1) {
+          positions.forEach(function (pos) {
+            conflicts.add(pos[0] + ':' + pos[1]);
+          });
+        }
+      });
+    }
+
+    var r;
+    var c;
+    for (r = 0; r < n; r++) {
+      var rowCells = [];
+      for (c = 0; c < n; c++) rowCells.push([r, c]);
+      markUnit(rowCells);
+    }
+    for (c = 0; c < n; c++) {
+      var colCells = [];
+      for (r = 0; r < n; r++) colCells.push([r, c]);
+      markUnit(colCells);
+    }
+    for (var boxR = 0; boxR < n; boxR += cfg.boxRows) {
+      for (var boxC = 0; boxC < n; boxC += cfg.boxCols) {
+        var boxCells = [];
+        for (r = boxR; r < boxR + cfg.boxRows; r++) {
+          for (c = boxC; c < boxC + cfg.boxCols; c++) boxCells.push([r, c]);
+        }
+        markUnit(boxCells);
+      }
+    }
+    return conflicts;
+  }
+
+  /*
    * 统计解的个数，最多数到 limit 个就停止。
    * 采用 MRV（每次选择候选最少的空格）+ 位运算，速度足够生成 9×9。
    */
@@ -379,6 +433,7 @@
     popcount: popcount,
     seedRandom: seedRandom,
     isValidSolution: isValidSolution,
+    findConflicts: findConflicts,
     countSolutions: countSolutions,
     solveGrid: solveGrid,
     generateSolved: generateSolved,
