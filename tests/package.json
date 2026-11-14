@@ -1,0 +1,10 @@
+{
+  "name": "sudoku-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "数独游戏的开发测试依赖",
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "ws": "^8.18.0"
+  }
+}
