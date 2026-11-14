@@ -682,6 +682,13 @@ a {
   padding: 0 2px;
 }
 
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+}
+
 .hint-text {
   margin: 0;
   min-width: 0;

@@ -40,6 +40,7 @@
   var toastTimer = null;
   var modalChoice = { size: 9, difficulty: 'medium' };
   var winHiddenForModal = false;
+  var deferredInstallPrompt = null;
 
   /* ------------------------------------------------------------------ */
   /* 基础工具                                                            */
@@ -86,6 +87,7 @@
     cacheDom();
     buildMiniGrids();
     bindEvents();
+    registerServiceWorker();
     startTicker();
 
     var saved = loadSave();
@@ -143,6 +145,22 @@
     dom.playAgainBtn = $('playAgainBtn');
     dom.changeSettingsBtn = $('changeSettingsBtn');
     dom.toast = $('toast');
+    dom.installBtn = $('installBtn');
+  }
+
+  /* 仅 HTTPS / localhost 注册 Service Worker，file:// 下跳过 */
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    var isSecure =
+      location.protocol === 'https:' ||
+      location.hostname === 'localhost' ||
+      location.hostname === '127.0.0.1';
+    if (!isSecure) return;
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function (err) {
+        console.warn('Service Worker 注册失败：', err);
+      });
+    });
   }
 
   function buildMiniGrids() {
@@ -241,6 +259,35 @@
       }
     });
     window.addEventListener('beforeunload', save);
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+    window.addEventListener('appinstalled', onAppInstalled);
+    if (dom.installBtn) dom.installBtn.addEventListener('click', promptInstall);
+  }
+
+  function onBeforeInstallPrompt(event) {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (dom.installBtn) dom.installBtn.hidden = false;
+  }
+
+  function onAppInstalled() {
+    deferredInstallPrompt = null;
+    if (dom.installBtn) dom.installBtn.hidden = true;
+    toast('已安装到桌面');
+  }
+
+  function promptInstall() {
+    if (!deferredInstallPrompt) return;
+    var promptEvent = deferredInstallPrompt;
+    deferredInstallPrompt = null;
+    promptEvent.prompt();
+    if (promptEvent.userChoice && typeof promptEvent.userChoice.then === 'function') {
+      promptEvent.userChoice.then(function (choice) {
+        if (choice && choice.outcome === 'accepted' && dom.installBtn) {
+          dom.installBtn.hidden = true;
+        }
+      });
+    }
   }
 
   function onBoardClick(event) {
