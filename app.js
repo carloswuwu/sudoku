@@ -87,7 +87,7 @@
     cacheDom();
     buildMiniGrids();
     bindEvents();
-    registerServiceWorker();
+    setupPwa();
     startTicker();
 
     var saved = loadSave();
@@ -148,14 +148,26 @@
     dom.installBtn = $('installBtn');
   }
 
-  /* 仅 HTTPS / localhost 注册 Service Worker，file:// 下跳过 */
-  function registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
-    var isSecure =
+  /* PWA：仅在 HTTPS / localhost 下挂载 manifest 并注册 Service Worker（file:// 下跳过） */
+  function isPwaContext() {
+    return (
       location.protocol === 'https:' ||
       location.hostname === 'localhost' ||
-      location.hostname === '127.0.0.1';
-    if (!isSecure) return;
+      location.hostname === '127.0.0.1'
+    );
+  }
+
+  function setupPwa() {
+    if (!isPwaContext()) return;
+
+    if (!document.querySelector('link[rel="manifest"]')) {
+      var manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      manifestLink.href = 'manifest.webmanifest';
+      document.head.appendChild(manifestLink);
+    }
+
+    if (!('serviceWorker' in navigator)) return;
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function (err) {
         console.warn('Service Worker 注册失败：', err);
