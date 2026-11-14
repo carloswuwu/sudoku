@@ -14,7 +14,6 @@
     medium: '恰到好处的思考量，经典体验。',
     hard: '提示更少，需要更扎实的推理。',
   };
-  var CONFETTI_COLORS = ['#22d3ee', '#818cf8', '#f472b6', '#fbbf24', '#34d399', '#fde68a'];
 
   var state = {
     size: 9,
@@ -144,7 +143,6 @@
     dom.playAgainBtn = $('playAgainBtn');
     dom.changeSettingsBtn = $('changeSettingsBtn');
     dom.toast = $('toast');
-    dom.confetti = $('confetti');
   }
 
   function buildMiniGrids() {
@@ -354,7 +352,7 @@
     dom.board.setAttribute('data-size', String(n));
     dom.board.setAttribute('aria-label', n + '×' + n + ' 数独棋盘');
 
-    var boardMax = n === 4 ? 480 : n === 6 ? 540 : 600;
+    var boardMax = n === 4 ? 460 : n === 6 ? 520 : 560;
     dom.app.style.setProperty('--board-max', boardMax + 'px');
 
     cellRefs = [];
@@ -404,9 +402,8 @@
 
   function buildPad() {
     var n = state.size;
-    var cols = n === 4 ? 2 : 3;
     dom.pad.innerHTML = '';
-    dom.pad.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+    dom.pad.setAttribute('data-size', String(n));
     padButtons = {};
     for (var d = 1; d <= n; d++) {
       var btn = document.createElement('button');
@@ -936,7 +933,7 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* 胜利 / 彩带                                                         */
+  /* 胜利                                                                */
   /* ------------------------------------------------------------------ */
 
   function showWin() {
@@ -945,33 +942,10 @@
     dom.winHints.textContent = String(state.hints);
     dom.winDifficulty.textContent = state.size + '×' + state.size + ' · ' + DIFFICULTY_LABEL[state.difficulty];
     dom.winOverlay.hidden = false;
-    launchConfetti();
   }
 
   function hideWin() {
     dom.winOverlay.hidden = true;
-  }
-
-  function launchConfetti() {
-    var layer = dom.confetti;
-    layer.innerHTML = '';
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    for (var i = 0; i < 84; i++) {
-      var piece = document.createElement('i');
-      piece.className = 'confetti-piece';
-      piece.style.left = Math.random() * 100 + '%';
-      piece.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
-      piece.style.width = 5 + Math.random() * 7 + 'px';
-      piece.style.height = 9 + Math.random() * 9 + 'px';
-      piece.style.setProperty('--delay', (Math.random() * 0.7).toFixed(2) + 's');
-      piece.style.setProperty('--dur', (2.6 + Math.random() * 1.8).toFixed(2) + 's');
-      piece.style.setProperty('--drift', Math.round(Math.random() * 180 - 90) + 'px');
-      piece.style.setProperty('--rot', Math.round(Math.random() * 900 - 450) + 'deg');
-      layer.appendChild(piece);
-    }
-    setTimeout(function () {
-      layer.innerHTML = '';
-    }, 5200);
   }
 
   /* ------------------------------------------------------------------ */

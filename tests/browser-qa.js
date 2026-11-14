@@ -310,6 +310,7 @@ async function main() {
     ok((await evaluate('__qa.cell(' + inputResult.r + ',' + inputResult.c + ').querySelector(".num").textContent')) === '', 'Backspace 可擦除填入的数字');
 
     console.log('\n[4×4 冲突标红]');
+    const mistakesBeforeConflict = await evaluate("Number(document.getElementById('mistakes').textContent)");
     const conflictInfo = await evaluate(`(() => {
       const all = Array.from(document.querySelectorAll('#board .cell'));
       const empty = all.find(function (c) { return !c.classList.contains('given') && !c.querySelector('.num').textContent; });
@@ -342,7 +343,19 @@ async function main() {
     })()`);
     if (conflictInfo) {
       ok(conflictInfo.emptyConflict && conflictInfo.peerConflict, '冲突时新填格与已有数字格都标红');
-      ok(conflictInfo.mistakes === 1, '冲突错误计数为 1');
+      ok(conflictInfo.mistakes === mistakesBeforeConflict + 1, '冲突错误计数 +1');
+      const conflictDebug = await evaluate(`(() => {
+        return Array.from(document.querySelectorAll('#board .cell.conflict')).map(function (c) {
+          return {
+            cls: c.className,
+            color: getComputedStyle(c).color,
+            numColor: getComputedStyle(c.querySelector('.num')).color,
+            bg: getComputedStyle(c).backgroundColor
+          };
+        });
+      })()`);
+      console.log('  CONFLICT_DEBUG=' + JSON.stringify(conflictDebug));
+      await wait(300);
       report.screenshots.push(await screenshot('browser-conflict.png'));
       await evaluate('__qa.key("Backspace")');
       const conflictAfterErase = await evaluate(
@@ -479,6 +492,23 @@ async function main() {
     ok(m.vw === 360, '视口宽度为 360（实际 ' + m.vw + '）');
     ok(m.docScrollW <= m.vw + 1, '小屏没有横向溢出（scrollWidth=' + m.docScrollW + '）');
     report.screenshots.push(await screenshot('browser-mobile-small.png'));
+
+    /* ---------------- 深色模式 ---------------- */
+    console.log('\n[深色模式 1440×1000]');
+    await loadPage(1440, 1000, false);
+    await send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+    });
+    await wait(500);
+    await evaluate(helper);
+    const darkStyles = await evaluate(`(() => ({
+      bodyBg: getComputedStyle(document.body).backgroundColor,
+      boardBg: getComputedStyle(document.getElementById('board')).backgroundColor,
+      textColor: getComputedStyle(document.querySelector('.title-block h1')).color
+    }))()`);
+    console.log('  DARK_STYLES=' + JSON.stringify(darkStyles));
+    ok(darkStyles.bodyBg === 'rgb(0, 0, 0)', '深色模式背景为黑色（实际 ' + darkStyles.bodyBg + '）');
+    report.screenshots.push(await screenshot('browser-dark.png'));
 
     console.log('\n[页面脚本错误]');
     ok(pageErrors.length === 0, '全程没有脚本错误' + (pageErrors.length ? '：' + pageErrors.slice(0, 5).join(' | ') : ''));
