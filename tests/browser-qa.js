@@ -277,6 +277,50 @@ async function main() {
     ok((await evaluate("document.querySelectorAll('#board .cell.given').length")) > 0, '题目数字已渲染');
     report.screenshots.push(await screenshot('browser-desktop.png'));
 
+    console.log('\n[逻辑提示]');
+    const hintInfo = await evaluate(`(() => {
+      const userFilled = function () {
+        return Array.from(document.querySelectorAll('#board .cell:not(.given)')).filter(function (c) {
+          return c.querySelector('.num').textContent !== '';
+        }).length;
+      };
+      const beforeFilled = userFilled();
+      const beforeHints = Number(document.getElementById('hints').textContent);
+      __qa.click(document.getElementById('hintBtn'));
+      return {
+        beforeFilled: beforeFilled,
+        afterFilled: userFilled(),
+        beforeHints: beforeHints,
+        afterHints: Number(document.getElementById('hints').textContent),
+        cardVisible: !document.getElementById('hintCard').hidden,
+        title: document.getElementById('hintTitle').textContent,
+        text: document.getElementById('hintText').textContent,
+        targetCount: document.querySelectorAll('#board .cell.hint-target').length,
+        glowCount: document.querySelectorAll('#board .cell.hint-glow').length
+      };
+    })()`);
+    ok(hintInfo.cardVisible, '提示说明卡片显示');
+    ok(hintInfo.afterHints === hintInfo.beforeHints + 1, '提示计数 +1');
+    ok(hintInfo.afterFilled === hintInfo.beforeFilled + 1, '提示填入一个数字');
+    ok(hintInfo.title.length > 0, '提示包含技巧名称：' + hintInfo.title);
+    ok(hintInfo.text.length > 10, '提示包含推理说明');
+    ok(hintInfo.targetCount === 1, '目标格有提示动画标记');
+    ok(hintInfo.glowCount > 0, '相关格子有提示高亮');
+    report.screenshots.push(await screenshot('browser-hint.png'));
+    await evaluate('__qa.click(document.getElementById("hintClose"))');
+    ok(await evaluate('document.getElementById("hintCard").hidden'), '关闭按钮可隐藏提示卡片');
+    await evaluate('__qa.click(document.getElementById("undoBtn"))');
+    const hintRestored = await evaluate(`(() => ({
+      hints: Number(document.getElementById('hints').textContent),
+      filled: Array.from(document.querySelectorAll('#board .cell:not(.given)')).filter(function (c) {
+        return c.querySelector('.num').textContent !== '';
+      }).length,
+      target: document.querySelectorAll('#board .cell.hint-target').length
+    }))()`);
+    ok(hintRestored.hints === hintInfo.beforeHints, '撤销后提示计数还原');
+    ok(hintRestored.filled === hintInfo.beforeFilled, '撤销后盘面还原');
+    ok(hintRestored.target === 0, '撤销后提示高亮清除');
+
     console.log('\n[新游戏弹窗]');
     await evaluate('__qa.click(document.getElementById("newGameBtn"))');
     await waitFor('!document.getElementById("newGameModal").hidden', 4000);

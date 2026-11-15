@@ -4,13 +4,14 @@
  */
 'use strict';
 
-const CACHE_NAME = 'sudoku-offline-v1';
+const CACHE_NAME = 'sudoku-offline-v2';
 const PRECACHE_URLS = [
   './',
   'index.html',
   'style.css',
   'app.js',
   'sudoku-core.js',
+  'sudoku-hints.js',
   'manifest.webmanifest',
   'icon-192.png',
   'icon-512.png',

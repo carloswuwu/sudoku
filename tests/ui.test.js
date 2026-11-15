@@ -164,14 +164,28 @@ async function main() {
     eq(numOf(freePlacement.cell), '', '测试后擦除数字');
   }
 
-  console.log('\n[3] 提示 + 撤销');
+  console.log('\n[3] 逻辑提示 + 撤销');
+  const userFilledCount = () =>
+    Array.from(document.querySelectorAll('#board .cell:not(.given)')).filter(
+      (cell) => cell.querySelector('.num').textContent !== ''
+    ).length;
   const beforeHint = hintsCount();
+  const beforeFilled = userFilledCount();
   click($('hintBtn'));
   eq(hintsCount(), beforeHint + 1, '提示计数加 1');
-  ok(numOf(empty) !== '', '提示填入了一个数字');
+  eq(userFilledCount(), beforeFilled + 1, '提示填入了一个数字');
+  ok(!$('hintCard').hidden, '提示说明卡片显示');
+  ok($('hintTitle').textContent.length > 0, '提示包含技巧标题：' + $('hintTitle').textContent);
+  ok($('hintText').textContent.length > 10, '提示包含推理说明');
+  eq(document.querySelectorAll('#board .cell.hint-target').length, 1, '目标格有提示动画标记');
+  ok(document.querySelectorAll('#board .cell.hint-glow').length > 0, '相关格子有提示高亮');
+  click($('hintClose'));
+  ok($('hintCard').hidden, '关闭按钮可隐藏提示卡片');
   click($('undoBtn'));
-  eq(numOf(empty), '', '撤销后数字被还原');
   eq(hintsCount(), beforeHint, '撤销后提示计数还原');
+  eq(userFilledCount(), beforeFilled, '撤销后盘面还原');
+  ok(!document.querySelector('#board .cell.hint-target'), '撤销后目标高亮清除');
+  ok($('hintCard').hidden, '撤销后提示卡片隐藏');
 
   console.log('\n[4] 笔记模式');
   const noteCell = firstEmptyCell();

@@ -195,6 +195,27 @@ async function main() {
     console.log('\n[页面与 Manifest]');
     await loadPage();
     ok(await evaluate("document.title.indexOf('数独') >= 0"), '页面标题包含「数独」');
+
+    console.log('\n[逻辑提示]');
+    const hintInfo = await evaluate(`(() => {
+      document.getElementById('hintBtn').click();
+      const card = document.getElementById('hintCard');
+      return {
+        cardVisible: !card.hidden,
+        title: document.getElementById('hintTitle').textContent,
+        text: document.getElementById('hintText').textContent,
+        hints: Number(document.getElementById('hints').textContent),
+        target: document.querySelectorAll('#board .cell.hint-target').length
+      };
+    })()`);
+    ok(hintInfo.cardVisible, '提示卡片可见');
+    ok(hintInfo.title.length > 0 && hintInfo.text.length > 10, '提示包含技巧与说明');
+    ok(hintInfo.hints === 1, '提示计数为 1');
+    ok(hintInfo.target === 1, '目标格有提示动画标记');
+    await evaluate("document.getElementById('hintClose').click(); document.getElementById('undoBtn').click();");
+    ok(await evaluate('document.getElementById("hintCard").hidden'), '关闭提示后卡片隐藏');
+    ok(await evaluate('Number(document.getElementById("hints").textContent) === 0'), '撤销后提示计数还原');
+
     const manifestLink = await evaluate("(document.querySelector('link[rel=\"manifest\"]') || {}).href || ''");
     ok(/manifest\.webmanifest$/.test(manifestLink), '页面包含 manifest 链接：' + manifestLink);
 

@@ -6,6 +6,7 @@
   'use strict';
 
   var Core = window.SudokuCore;
+  var Hints = window.SudokuHints;
   var STORAGE_KEY = 'sudoku-save-v1';
   var CONFIG_KEY = 'sudoku-last-config-v1';
   var DIFFICULTY_LABEL = { easy: '简单', medium: '中等', hard: '困难' };
@@ -27,6 +28,8 @@
     mistakes: 0,
     hints: 0,
     hinted: new Set(),
+    hintHighlights: new Set(),
+    hintTargetKey: null,
     elapsed: 0,
     paused: false,
     completed: false,
@@ -38,6 +41,8 @@
   var padButtons = {};
   var ticker = null;
   var toastTimer = null;
+  var hintCardTimer = null;
+  var hintHighlightTimer = null;
   var modalChoice = { size: 9, difficulty: 'medium' };
   var winHiddenForModal = false;
   var deferredInstallPrompt = null;
@@ -146,6 +151,10 @@
     dom.changeSettingsBtn = $('changeSettingsBtn');
     dom.toast = $('toast');
     dom.installBtn = $('installBtn');
+    dom.hintCard = $('hintCard');
+    dom.hintTitle = $('hintTitle');
+    dom.hintText = $('hintText');
+    dom.hintClose = $('hintClose');
   }
 
   /* PWA：仅在 HTTPS / localhost 下挂载 manifest 并注册 Service Worker（file:// 下跳过） */
@@ -218,6 +227,7 @@
     dom.undoBtn.addEventListener('click', undo);
     dom.eraseBtn.addEventListener('click', eraseSelected);
     dom.hintBtn.addEventListener('click', useHint);
+    if (dom.hintClose) dom.hintClose.addEventListener('click', hideHintCard);
 
     dom.pauseBtn.addEventListener('click', togglePause);
     dom.pauseOverlay.addEventListener('click', function () {
@@ -531,6 +541,9 @@
           else if (!isSelected && value === selVal) classes.push('same');
         }
 
+        if (state.hintHighlights.has(keyOf(r, c))) classes.push('hint-glow');
+        if (state.hintTargetKey === keyOf(r, c)) classes.push('hint-target');
+
         ref.el.className = classes.join(' ');
 
         var label = '第 ' + (r + 1) + ' 行第 ' + (c + 1) + ' 列，';
@@ -603,6 +616,44 @@
     setTimeout(function () {
       el.classList.remove('pulse');
     }, 260);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 逻辑提示                                                            */
+  /* ------------------------------------------------------------------ */
+
+  function showHintCard(title, text) {
+    if (!dom.hintCard) return;
+    dom.hintTitle.textContent = title;
+    dom.hintText.textContent = text;
+    dom.hintCard.hidden = false;
+    clearTimeout(hintCardTimer);
+    hintCardTimer = setTimeout(hideHintCard, 14000);
+  }
+
+  function hideHintCard() {
+    clearTimeout(hintCardTimer);
+    if (dom.hintCard) dom.hintCard.hidden = true;
+  }
+
+  function clearHintHighlights() {
+    clearTimeout(hintHighlightTimer);
+    state.hintHighlights = new Set();
+    state.hintTargetKey = null;
+  }
+
+  function resetHint() {
+    hideHintCard();
+    clearHintHighlights();
+  }
+
+  function scheduleHintHighlightClear() {
+    clearTimeout(hintHighlightTimer);
+    hintHighlightTimer = setTimeout(function () {
+      state.hintHighlights = new Set();
+      state.hintTargetKey = null;
+      if (cellRefs.length) renderBoard();
+    }, 5000);
   }
 
   /* ------------------------------------------------------------------ */
@@ -769,6 +820,7 @@
     state.hinted = new Set(snapshot.hinted);
     state.selected = snapshot.selected;
     state.notesMode = snapshot.notesMode;
+    resetHint();
     renderAll();
     save();
   }
@@ -776,37 +828,40 @@
   function useHint() {
     if (state.paused || state.completed) return;
     if (!state.values.length) return;
-    var n = state.size;
-    var target = null;
-    var sel = state.selected;
-    if (sel && !state.puzzle[sel.r][sel.c] && state.values[sel.r][sel.c] !== state.solution[sel.r][sel.c]) {
-      target = { r: sel.r, c: sel.c };
-    }
-    if (!target) {
-      outer: for (var r = 0; r < n; r++) {
-        for (var c = 0; c < n; c++) {
-          if (!state.puzzle[r][c] && state.values[r][c] !== state.solution[r][c]) {
-            target = { r: r, c: c };
-            break outer;
-          }
-        }
-      }
-    }
-    if (!target) {
-      toast('这一局已经填完啦');
+    if (!Hints) {
+      toast('提示功能暂不可用');
       return;
     }
+
+    var result = Hints.findHint(state.values, state.size, state.solution, state.selected);
+    if (!result) return;
+
+    if (!result.ok) {
+      clearHintHighlights();
+      if (cellRefs.length) renderBoard();
+      showHintCard(result.title || '暂时无法提示', result.explanation || '');
+      return;
+    }
+
+    var target = result.cell;
+    var value = result.value;
+    var key = keyOf(target.r, target.c);
+
     pushHistory();
-    var value = state.solution[target.r][target.c];
     state.values[target.r][target.c] = value;
     state.notes[target.r][target.c].clear();
-    state.hinted.add(keyOf(target.r, target.c));
+    state.hinted.add(key);
     state.hints += 1;
-    state.selected = target;
+    state.selected = { r: target.r, c: target.c };
+    state.hintHighlights = new Set(result.highlights || []);
+    state.hintTargetKey = key;
+
     clearPeerNotes(target.r, target.c, value);
     renderAll();
     save();
     pulseCell(target.r, target.c);
+    showHintCard(result.title || '提示', result.explanation || ('这里应填 ' + value + '。'));
+    scheduleHintHighlightClear();
     checkCompletion();
   }
 
@@ -868,9 +923,11 @@
     if (state.completed) return;
     if (state.paused === paused) return;
     state.paused = paused;
+    if (paused) resetHint();
     updatePauseUI();
     renderMeta();
     save();
+    if (paused && cellRefs.length) renderBoard();
   }
 
   function restartGame() {
@@ -889,6 +946,7 @@
     state.notesMode = false;
     state.paused = false;
     state.completed = false;
+    resetHint();
     updatePauseUI();
     renderAll();
     save();
@@ -978,6 +1036,7 @@
     state.history = [];
 
     hideWin();
+    resetHint();
     dom.pauseOverlay.hidden = true;
     buildBoard();
     buildPad();
@@ -996,6 +1055,7 @@
   /* ------------------------------------------------------------------ */
 
   function showWin() {
+    hideHintCard();
     dom.winTime.textContent = formatTime(state.elapsed);
     dom.winMistakes.textContent = String(state.mistakes);
     dom.winHints.textContent = String(state.hints);
