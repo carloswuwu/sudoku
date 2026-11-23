@@ -63,15 +63,19 @@ function testUnsolvedUniquenessBasics() {
   check(Core.solveGrid(conflict, 4) === null, '冲突棋盘 solveGrid 应为 null');
   check(!Core.isValidSolution(conflict, 4), '冲突棋盘不应通过完成校验');
 
-  // 求解器应能解出「挖空终盘」
+  // 求解器应能解出「挖空终盘」（这里用保证唯一解的题目，空格足够多）
   for (const size of SIZES) {
-    const solution = Core.generateSolved(size);
-    const puzzle = Core.cloneGrid(solution);
-    for (let i = 0; i < Math.floor(size * size * 0.55); i++) {
-      puzzle[(i * 7) % size][(i * 5) % size] = 0;
+    const game = Core.generatePuzzle(size, 'medium', Core.seedRandom(1234 + size));
+    let cleared = 0;
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (game.puzzle[r][c] === 0) cleared++;
+      }
     }
-    const solved = Core.solveGrid(puzzle, size);
+    check(cleared >= Math.floor(size * size * 0.4), `${size}×${size} 空格数量不足（${cleared}）`);
+    const solved = Core.solveGrid(game.puzzle, size);
     check(solved !== null, `${size}×${size} solveGrid 求解失败`);
+    check(solved && JSON.stringify(solved) === JSON.stringify(game.solution), `${size}×${size} 求解结果应与原终盘一致`);
   }
 }
 
@@ -170,23 +174,28 @@ function testDeterministicSeed() {
   check(JSON.stringify(a.puzzle) !== JSON.stringify(c.puzzle), '不同种子应生成不同题目');
 }
 
-function testDifficultyOrdering() {
+function testDifficultyTargets() {
   for (const size of SIZES) {
-    const clues = {};
-    for (let i = 0; i < 3; i++) {
-      for (const d of DIFFICULTIES) {
-        const g = Core.generatePuzzle(size, d);
-        (clues[d] = clues[d] || []).push(g.clues);
-      }
-    }
-    const avg = (arr) => arr.reduce((x, y) => x + y, 0) / arr.length;
+    const targets = Core.TARGET_CLUES[size];
     check(
-      avg(clues.easy) >= avg(clues.medium) && avg(clues.medium) >= avg(clues.hard),
-      `${size}×${size}: 提示数未随难度递减 (${JSON.stringify(
-        Object.fromEntries(Object.entries(clues).map(([k, v]) => [k, avg(v)]))
-      )})`
+      targets.easy > targets.medium && targets.medium > targets.hard,
+      `${size}×${size}: 难度目标提示数应递增递减`
     );
+    for (const difficulty of DIFFICULTIES) {
+      /* 固定种子 → 生成结果可复现，避免偶发失败无法重放 */
+      const seed = 1000 + size * 10 + DIFFICULTIES.indexOf(difficulty);
+      const game = Core.generatePuzzle(size, difficulty, Core.seedRandom(seed));
+      check(
+        game.clues === targets[difficulty],
+        `${size}×${size}/${difficulty}: 实际提示数 ${game.clues}，目标 ${targets[difficulty]}`
+      );
+    }
   }
+  /* 未知难度回退到 medium */
+  const fallback = Core.generatePuzzle(4, 'impossible', Core.seedRandom(7));
+  check(fallback.difficulty === 'medium', '未知难度应回退为 medium');
+  const emptyFallback = Core.generatePuzzle(4, '', Core.seedRandom(8));
+  check(emptyFallback.difficulty === 'medium', '空难度应回退为 medium');
 }
 
 console.log('Sudoku 核心逻辑测试');
@@ -194,5 +203,5 @@ testUnsolvedUniquenessBasics();
 testConflictDetection();
 testGeneration();
 testDeterministicSeed();
-testDifficultyOrdering();
+testDifficultyTargets();
 console.log(`\n全部通过 ✓  (${checks} 项断言)`);

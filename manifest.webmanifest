@@ -3,13 +3,13 @@
   "short_name": "数独",
   "description": "简洁优雅的数独游戏，支持 4×4、6×6、9×9 三种棋盘和三个难度，可离线游玩。",
   "lang": "zh-CN",
-  "id": "/sudoku/",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
-  "background_color": "#F2F2F7",
-  "theme_color": "#F2F2F7",
+  "background_color": "#F2F3F7",
+  "theme_color": "#F2F3F7",
   "categories": ["games", "entertainment"],
   "prefer_related_applications": false,
   "icons": [
@@ -26,10 +26,26 @@
       "purpose": "any"
     },
     {
-      "src": "icon-512.png",
+      "src": "icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshot.png",
+      "sizes": "1440x1000",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "数独游戏主界面：9×9 棋盘与功能工具栏"
+    },
+    {
+      "src": "hint-screenshot.png",
+      "sizes": "1440x1000",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "智能提示：解题技巧讲解卡片"
     }
   ]
 }

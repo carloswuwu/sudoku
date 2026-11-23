@@ -2,6 +2,11 @@
 node_modules/
 tests/node_modules/
 tests/.npm-cache/
+__pycache__/
+*.pyc
+
+# 本机代码索引（CodeGraph），只属于当前机器
+.codegraph/
 
 # 系统与编辑器文件
 .DS_Store

@@ -11,10 +11,12 @@
   var CONFIG_KEY = 'sudoku-last-config-v1';
   var DIFFICULTY_LABEL = { easy: '简单', medium: '中等', hard: '困难' };
   var DIFFICULTY_DESC = {
-    easy: '提示较多，适合热身与新手。',
-    medium: '恰到好处的思考量，经典体验。',
-    hard: '提示更少，需要更扎实的推理。',
+    easy: '提示较多，只需唯一候选数即可推出。',
+    medium: '需要使用数对排除等常用技巧。',
+    hard: '可能出现区块排除、矩形排除等进阶推理。',
   };
+  /* 各难度期望的推理层级：1=唯一候选，2=数对，3=区块/行列排除，4=矩形排除（5=逻辑链也无法完成） */
+  var DIFFICULTY_TIER = { easy: 1, medium: 2, hard: 3 };
 
   var state = {
     size: 9,
@@ -40,12 +42,18 @@
   var cellRefs = [];
   var padButtons = {};
   var ticker = null;
+  var timerBase = 0;
+  var timerAnchor = null;
   var toastTimer = null;
   var hintCardTimer = null;
   var hintHighlightTimer = null;
   var modalChoice = { size: 9, difficulty: 'medium' };
   var winHiddenForModal = false;
   var deferredInstallPrompt = null;
+  var modalReturnFocus = null;
+  var winReturnFocus = null;
+  var pauseReturnFocus = null;
+  var restartReturnFocus = null;
 
   /* ------------------------------------------------------------------ */
   /* 基础工具                                                            */
@@ -63,6 +71,58 @@
     return Math.min(max, Math.max(min, value));
   }
 
+  function activeElementOrNull() {
+    var el = document.activeElement;
+    return el && el !== document.body ? el : null;
+  }
+
+  function restoreFocus(el) {
+    if (!el || !el.isConnected || el.disabled || typeof el.focus !== 'function') return;
+    try {
+      el.focus({ preventScroll: true });
+    } catch (err) {
+      el.focus();
+    }
+  }
+
+  function focusAfterRender(el) {
+    if (!el || typeof el.focus !== 'function') return;
+    setTimeout(function () {
+      try {
+        el.focus({ preventScroll: true });
+      } catch (err) {
+        el.focus();
+      }
+    }, 0);
+  }
+
+  /* 把 Tab / Shift+Tab 限制在当前弹窗内（对话框打开时背景不可聚焦） */
+  function trapTab(container, event) {
+    if (!container || event.key !== 'Tab') return;
+    var focusable = container.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable.length) {
+      event.preventDefault();
+      return;
+    }
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    var active = document.activeElement;
+    if (!container.contains(active)) {
+      event.preventDefault();
+      first.focus();
+      return;
+    }
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   function formatTime(totalSeconds) {
     var sec = Math.max(0, Math.floor(totalSeconds));
     var h = Math.floor(sec / 3600);
@@ -74,6 +134,34 @@
     return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* 计时器：按真实时间累计，而不是数 setInterval 次数，避免掉帧/节流时少计时 */
+  /* ------------------------------------------------------------------ */
+
+  function currentElapsedSeconds() {
+    if (timerAnchor === null) return timerBase;
+    return timerBase + Math.floor((Date.now() - timerAnchor) / 1000);
+  }
+
+  function startTimer() {
+    if (timerAnchor !== null) return;
+    timerBase = state.elapsed;
+    timerAnchor = Date.now();
+  }
+
+  function pauseTimer() {
+    if (timerAnchor === null) return;
+    state.elapsed = currentElapsedSeconds();
+    timerBase = state.elapsed;
+    timerAnchor = null;
+  }
+
+  function resetTimer() {
+    state.elapsed = 0;
+    timerBase = 0;
+    timerAnchor = null;
+  }
+
   function createNotes(size) {
     var notes = [];
     for (var r = 0; r < size; r++) {
@@ -82,6 +170,52 @@
       notes.push(row);
     }
     return notes;
+  }
+
+  /*
+   * 按难度生成题目：出题仍由 sudoku-core 负责（提示数目标保证唯一解），
+   * 这里再用提示引擎的难度分析挑选真正需要对应推理层级的盘面。
+   * 尝试次数有上限，并保留最接近目标难度的候选，避免生成卡顿。
+   */
+  function analyzeTier(puzzle, size) {
+    if (!Hints || typeof Hints.analyzeDifficulty !== 'function') return -1;
+    var info = Hints.analyzeDifficulty(puzzle, size);
+    if (!info) return -1;
+    return info.solved ? info.maxTier : 5;
+  }
+
+  function acceptTier(score, difficulty) {
+    if (score < 0) return true;
+    if (difficulty === 'hard') return score >= 3;
+    if (difficulty === 'medium') return score === 2 || score === 3;
+    return score === 1 || score === 5;
+  }
+
+  function generateGame(size, difficulty) {
+    if (!Hints || typeof Hints.analyzeDifficulty !== 'function') {
+      return Core.generatePuzzle(size, difficulty);
+    }
+    var target = DIFFICULTY_TIER[difficulty] || 1;
+    var attempts = 1;
+    if (difficulty === 'medium') attempts = size === 9 ? 12 : size === 6 ? 4 : 1;
+    else if (difficulty === 'hard') attempts = size === 9 ? 10 : size === 6 ? 4 : 1;
+    if (attempts <= 1) return Core.generatePuzzle(size, difficulty);
+
+    var best = null;
+    var bestDistance = 99;
+    var bestScore = -1;
+    for (var i = 0; i < attempts; i++) {
+      var game = Core.generatePuzzle(size, difficulty);
+      var score = analyzeTier(game.puzzle, size);
+      if (acceptTier(score, difficulty)) return game;
+      var distance = Math.abs(score - target);
+      if (distance < bestDistance || (distance === bestDistance && score < bestScore)) {
+        best = game;
+        bestDistance = distance;
+        bestScore = score;
+      }
+    }
+    return best || Core.generatePuzzle(size, difficulty);
   }
 
   /* ------------------------------------------------------------------ */
@@ -104,7 +238,7 @@
     var game = null;
     var lastConfig = loadLastConfig();
     try {
-      game = Core.generatePuzzle(lastConfig.size, lastConfig.difficulty);
+      game = generateGame(lastConfig.size, lastConfig.difficulty);
     } catch (err) {
       console.error('生成初始题目失败', err);
     }
@@ -149,7 +283,11 @@
     dom.winDifficulty = $('winDifficulty');
     dom.playAgainBtn = $('playAgainBtn');
     dom.changeSettingsBtn = $('changeSettingsBtn');
+    dom.controls = document.querySelector('.controls');
     dom.toast = $('toast');
+    dom.restartModal = $('restartModal');
+    dom.restartConfirmBtn = $('restartConfirmBtn');
+    dom.restartCancelBtn = $('restartCancelBtn');
     dom.installBtn = $('installBtn');
     dom.hintCard = $('hintCard');
     dom.hintTitle = $('hintTitle');
@@ -207,12 +345,14 @@
   function startTicker() {
     if (ticker) clearInterval(ticker);
     ticker = setInterval(function () {
-      if (state.paused || state.completed) return;
-      if (!state.values.length) return;
-      state.elapsed += 1;
+      if (!state.values.length || state.paused || state.completed) return;
+      if (timerAnchor === null) startTimer();
+      var elapsed = currentElapsedSeconds();
+      if (elapsed === state.elapsed) return;
+      state.elapsed = elapsed;
       dom.timer.textContent = formatTime(state.elapsed);
       if (state.elapsed % 10 === 0) save();
-    }, 1000);
+    }, 500);
   }
 
   /* ------------------------------------------------------------------ */
@@ -221,6 +361,7 @@
 
   function bindEvents() {
     dom.board.addEventListener('click', onBoardClick);
+    dom.board.addEventListener('focusin', onBoardFocus);
     dom.pad.addEventListener('click', onPadClick);
 
     dom.notesBtn.addEventListener('click', toggleNotesMode);
@@ -230,12 +371,16 @@
     if (dom.hintClose) dom.hintClose.addEventListener('click', hideHintCard);
 
     dom.pauseBtn.addEventListener('click', togglePause);
+    if (dom.resumeBtn) dom.resumeBtn.addEventListener('click', function () {
+      setPaused(false);
+    });
     dom.pauseOverlay.addEventListener('click', function () {
       setPaused(false);
     });
 
     dom.newGameBtn.addEventListener('click', openNewGameModal);
-    dom.restartBtn.addEventListener('click', restartGame);
+    dom.restartBtn.addEventListener('click', openRestartConfirm);
+    dom.restartConfirmBtn.addEventListener('click', confirmRestart);
 
     dom.sizeOptions.addEventListener('click', function (event) {
       var card = event.target.closest('.size-card');
@@ -261,6 +406,14 @@
 
     dom.newGameModal.addEventListener('click', function (event) {
       if (event.target === dom.newGameModal) closeNewGameModal();
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.js-cancel-restart'), function (btn) {
+      btn.addEventListener('click', closeRestartConfirm);
+    });
+
+    dom.restartModal.addEventListener('click', function (event) {
+      if (event.target === dom.restartModal) closeRestartConfirm();
     });
 
     dom.playAgainBtn.addEventListener('click', function () {
@@ -320,6 +473,16 @@
     selectCell(r, c);
   }
 
+  /* Tab 进入棋盘或脚本聚焦某个格子时，同步选中状态 */
+  function onBoardFocus(event) {
+    var cell = event.target && event.target.closest ? event.target.closest('.cell') : null;
+    if (!cell || !dom.board.contains(cell)) return;
+    var r = parseInt(cell.getAttribute('data-r'), 10);
+    var c = parseInt(cell.getAttribute('data-c'), 10);
+    if (Number.isNaN(r) || Number.isNaN(c)) return;
+    selectCell(r, c);
+  }
+
   function onPadClick(event) {
     var btn = event.target.closest('.pad-btn');
     if (!btn) return;
@@ -327,16 +490,45 @@
   }
 
   function onKeydown(event) {
-    /* 弹窗打开时只处理 Esc */
+    /* 重玩确认弹窗优先于其他弹窗处理 */
+    if (!dom.restartModal.hidden) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeRestartConfirm();
+        return;
+      }
+      trapTab(dom.restartModal, event);
+      return;
+    }
+    /* 弹窗打开时只处理 Esc / Tab（焦点限制在弹窗内） */
     if (!dom.newGameModal.hidden) {
       if (event.key === 'Escape') {
         event.preventDefault();
         closeNewGameModal();
+        return;
       }
+      trapTab(dom.newGameModal, event);
       return;
     }
     if (!dom.winOverlay.hidden) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        hideWin();
+        return;
+      }
+      trapTab(dom.winOverlay, event);
       return;
+    }
+    if (state.paused) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPaused(false);
+        return;
+      }
+      if (event.key === 'Tab') {
+        trapTab(dom.pauseOverlay, event);
+        return;
+      }
     }
     if (event.ctrlKey || event.metaKey) {
       if (event.key.toLowerCase() === 'z') {
@@ -376,12 +568,6 @@
       case 'ArrowRight':
         event.preventDefault();
         moveSelection(0, 1);
-        return;
-      case 'Escape':
-        if (state.paused) {
-          event.preventDefault();
-          setPaused(false);
-        }
         return;
       default:
         break;
@@ -424,18 +610,27 @@
     var boardMax = n === 4 ? 460 : n === 6 ? 520 : 560;
     dom.app.style.setProperty('--board-max', boardMax + 'px');
 
+    dom.board.setAttribute('aria-rowcount', String(n));
+    dom.board.setAttribute('aria-colcount', String(n));
+
     cellRefs = [];
     var fragment = document.createDocumentFragment();
 
     for (var r = 0; r < n; r++) {
+      var rowEl = document.createElement('div');
+      rowEl.className = 'board-row';
+      rowEl.setAttribute('role', 'row');
       var rowRefs = [];
       for (var c = 0; c < n; c++) {
         var cell = document.createElement('button');
         cell.type = 'button';
         cell.className = 'cell';
+        cell.tabIndex = -1;
         cell.setAttribute('data-r', String(r));
         cell.setAttribute('data-c', String(c));
         cell.setAttribute('role', 'gridcell');
+        cell.setAttribute('aria-rowindex', String(r + 1));
+        cell.setAttribute('aria-colindex', String(c + 1));
         cell.setAttribute('aria-label', '第 ' + (r + 1) + ' 行第 ' + (c + 1) + ' 列');
         if (c < n - 1) {
           cell.classList.add((c + 1) % cfg.boxCols === 0 ? 'edge-r' : 'line-r');
@@ -460,9 +655,10 @@
 
         cell.appendChild(num);
         cell.appendChild(notes);
-        fragment.appendChild(cell);
+        rowEl.appendChild(cell);
         rowRefs.push({ el: cell, num: num, notes: notes, noteSpans: noteSpans });
       }
+      fragment.appendChild(rowEl);
       cellRefs.push(rowRefs);
     }
 
@@ -512,6 +708,9 @@
       selVal = state.values[sel.r][sel.c];
       selBox = Core.boxIndex(sel.r, sel.c, n);
     }
+    /* 焦点落点：有选中格用选中格，否则用左上角，保证棋盘始终只有一个 Tab 停留点 */
+    var rovingR = sel ? sel.r : 0;
+    var rovingC = sel ? sel.c : 0;
     /* 只根据行/列/宫规则找冲突，不参考题目答案 */
     var conflicts = Core.findConflicts(state.values, n);
 
@@ -546,11 +745,25 @@
 
         ref.el.className = classes.join(' ');
 
+        var noteSet = state.notes[r][c];
+        var noteList = [];
+        if (!value && noteSet.size) {
+          noteSet.forEach(function (d) {
+            noteList.push(d);
+          });
+          noteList.sort(function (a, b) {
+            return a - b;
+          });
+        }
+
         var label = '第 ' + (r + 1) + ' 行第 ' + (c + 1) + ' 列，';
         label += value ? '数字 ' + value : '空';
+        if (!value && noteList.length) label += '，笔记 ' + noteList.join('、');
         if (given) label += '（题目）';
         if (conflicts.has(keyOf(r, c))) label += '（与同行、同列或同宫的数字重复）';
         ref.el.setAttribute('aria-label', label);
+        ref.el.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        ref.el.tabIndex = r === rovingR && c === rovingC ? 0 : -1;
 
         if (value !== 0) {
           ref.num.textContent = String(value);
@@ -558,7 +771,6 @@
           for (var d = 1; d <= n; d++) ref.noteSpans.get(d).textContent = '';
         } else {
           ref.num.textContent = '';
-          var noteSet = state.notes[r][c];
           var hasNotes = noteSet.size > 0;
           ref.notes.classList.toggle('show', hasNotes);
           for (var d2 = 1; d2 <= n; d2++) {
@@ -585,6 +797,10 @@
       var remain = n - count;
       btn.querySelector('.count').textContent = remain > 0 ? remain : '✓';
       btn.classList.toggle('complete', remain <= 0);
+      btn.setAttribute(
+        'aria-label',
+        remain > 0 ? '填入数字 ' + d + '，还剩 ' + remain + ' 个' : '填入数字 ' + d + '，已完成'
+      );
     }
   }
 
@@ -662,8 +878,25 @@
 
   function selectCell(r, c) {
     if (state.paused || state.completed) return;
+    if (state.selected && state.selected.r === r && state.selected.c === c) {
+      focusCell(r, c);
+      return;
+    }
     state.selected = { r: r, c: c };
     renderBoard();
+    focusCell(r, c);
+  }
+
+  /* 把键盘焦点移到指定格子，让屏幕阅读器和键盘操作跟着选中格走 */
+  function focusCell(r, c) {
+    if (!cellRefs[r] || !cellRefs[r][c]) return;
+    var el = cellRefs[r][c].el;
+    if (document.activeElement === el) return;
+    try {
+      el.focus({ preventScroll: true });
+    } catch (err) {
+      el.focus();
+    }
   }
 
   function ensureSelection() {
@@ -674,6 +907,7 @@
         if (!state.puzzle[r][c] && !state.values[r][c]) {
           state.selected = { r: r, c: c };
           renderBoard();
+          focusCell(r, c);
           return state.selected;
         }
       }
@@ -733,6 +967,7 @@
     else set.add(digit);
     state.selected = { r: r, c: c };
     renderBoard();
+    renderMeta();
     save();
   }
 
@@ -746,6 +981,7 @@
     state.selected = { r: r, c: c };
     renderBoard();
     renderPad();
+    renderMeta();
     save();
   }
 
@@ -769,6 +1005,7 @@
     if (!state.selected) {
       state.selected = { r: 0, c: 0 };
       renderBoard();
+      focusCell(0, 0);
       return;
     }
     state.selected = {
@@ -776,6 +1013,7 @@
       c: clamp(state.selected.c + dc, 0, n - 1),
     };
     renderBoard();
+    focusCell(state.selected.r, state.selected.c);
   }
 
   function forEachPeer(r, c, fn) {
@@ -819,7 +1057,6 @@
     state.hints = snapshot.hints;
     state.hinted = new Set(snapshot.hinted);
     state.selected = snapshot.selected;
-    state.notesMode = snapshot.notesMode;
     resetHint();
     renderAll();
     save();
@@ -875,6 +1112,7 @@
     /* 填满且没有任何行/列/宫冲突，即为完成 */
     if (Core.findConflicts(state.values, n).size > 0) return false;
     state.completed = true;
+    pauseTimer();
     state.paused = false;
     updatePauseUI();
     renderAll();
@@ -897,7 +1135,6 @@
       hints: state.hints,
       hinted: Array.from(state.hinted),
       selected: state.selected ? { r: state.selected.r, c: state.selected.c } : null,
-      notesMode: state.notesMode,
     });
     if (state.history.length > 200) state.history.shift();
   }
@@ -923,16 +1160,54 @@
     if (state.completed) return;
     if (state.paused === paused) return;
     state.paused = paused;
-    if (paused) resetHint();
-    updatePauseUI();
-    renderMeta();
-    save();
-    if (paused && cellRefs.length) renderBoard();
+    if (paused) {
+      pauseTimer();
+      resetHint();
+      pauseReturnFocus = activeElementOrNull();
+      if (dom.board) dom.board.inert = true;
+      if (dom.controls) dom.controls.inert = true;
+      updatePauseUI();
+      renderMeta();
+      save();
+      if (cellRefs.length) renderBoard();
+      focusAfterRender(dom.resumeBtn);
+    } else {
+      if (dom.board) dom.board.inert = false;
+      if (dom.controls) dom.controls.inert = false;
+      startTimer();
+      updatePauseUI();
+      renderMeta();
+      save();
+      var returnTo = pauseReturnFocus;
+      pauseReturnFocus = null;
+      restoreFocus(returnTo);
+    }
   }
 
-  function restartGame() {
+  function openRestartConfirm() {
+    if (!state.values.length || state.completed) return;
+    restartReturnFocus = activeElementOrNull();
+    if (dom.app) dom.app.inert = true;
+    dom.restartModal.hidden = false;
+    focusAfterRender(dom.restartCancelBtn);
+  }
+
+  function closeRestartConfirm() {
+    if (dom.restartModal.hidden) return;
+    dom.restartModal.hidden = true;
+    if (dom.app) dom.app.inert = false;
+    var returnTo = restartReturnFocus;
+    restartReturnFocus = null;
+    restoreFocus(returnTo || dom.restartBtn);
+  }
+
+  function confirmRestart() {
+    closeRestartConfirm();
+    performRestart();
+  }
+
+  function performRestart() {
     if (!state.values.length) return;
-    if (!window.confirm('重玩本局？当前填入的数字会被清除。')) return;
     state.values = state.puzzle.map(function (row) {
       return row.slice();
     });
@@ -941,7 +1216,7 @@
     state.mistakes = 0;
     state.hints = 0;
     state.hinted = new Set();
-    state.elapsed = 0;
+    resetTimer();
     state.history = [];
     state.notesMode = false;
     state.paused = false;
@@ -950,6 +1225,7 @@
     updatePauseUI();
     renderAll();
     save();
+    startTimer();
     toast('已重新开始本局');
   }
 
@@ -958,24 +1234,31 @@
   /* ------------------------------------------------------------------ */
 
   function openNewGameModal() {
+    modalReturnFocus = activeElementOrNull();
+    if (dom.app) dom.app.inert = true;
     modalChoice.size = state.size;
     modalChoice.difficulty = state.difficulty;
     syncModalUI();
     dom.newGameModal.hidden = false;
-    setTimeout(function () {
-      try {
-        dom.startGameBtn.focus({ preventScroll: true });
-      } catch (err) {
-        dom.startGameBtn.focus();
-      }
-    }, 40);
+    focusAfterRender(dom.startGameBtn);
   }
 
   function closeNewGameModal() {
     dom.newGameModal.hidden = true;
+    var returnTo = modalReturnFocus;
+    modalReturnFocus = null;
     /* 从胜利弹窗进入「换个难度」后取消，应回到胜利弹窗 */
     if (winHiddenForModal && state.completed) {
       dom.winOverlay.hidden = false;
+      focusAfterRender(dom.playAgainBtn);
+    } else {
+      if (dom.app) dom.app.inert = false;
+      /* 暂停中打开又取消「新游戏」时，棋盘仍应保持不可聚焦 */
+      if (state.paused) {
+        if (dom.board) dom.board.inert = true;
+        if (dom.controls) dom.controls.inert = true;
+      }
+      restoreFocus(returnTo || dom.newGameBtn);
     }
     winHiddenForModal = false;
   }
@@ -1001,7 +1284,7 @@
       requestAnimationFrame(function () {
         var game = null;
         try {
-          game = Core.generatePuzzle(size, difficulty);
+          game = generateGame(size, difficulty);
         } catch (err) {
           console.error('生成题目失败', err);
         }
@@ -1030,7 +1313,7 @@
     state.mistakes = 0;
     state.hints = 0;
     state.hinted = new Set();
-    state.elapsed = 0;
+    resetTimer();
     state.paused = false;
     state.completed = false;
     state.history = [];
@@ -1043,6 +1326,7 @@
     updatePauseUI();
     renderAll();
     save();
+    startTimer();
     rememberConfig(game.size, game.difficulty);
   }
 
@@ -1056,15 +1340,22 @@
 
   function showWin() {
     hideHintCard();
+    winReturnFocus = activeElementOrNull();
     dom.winTime.textContent = formatTime(state.elapsed);
     dom.winMistakes.textContent = String(state.mistakes);
     dom.winHints.textContent = String(state.hints);
     dom.winDifficulty.textContent = state.size + '×' + state.size + ' · ' + DIFFICULTY_LABEL[state.difficulty];
     dom.winOverlay.hidden = false;
+    if (dom.app) dom.app.inert = true;
+    focusAfterRender(dom.playAgainBtn);
   }
 
   function hideWin() {
     dom.winOverlay.hidden = true;
+    if (dom.app) dom.app.inert = false;
+    var returnTo = winReturnFocus;
+    winReturnFocus = null;
+    restoreFocus(returnTo);
   }
 
   /* ------------------------------------------------------------------ */
@@ -1082,6 +1373,8 @@
     }
     if (!state.values.length) return;
     try {
+      var elapsedNow = currentElapsedSeconds();
+      state.elapsed = elapsedNow;
       var payload = {
         version: 1,
         size: state.size,
@@ -1099,7 +1392,7 @@
         mistakes: state.mistakes,
         hints: state.hints,
         hinted: Array.from(state.hinted),
-        elapsed: state.elapsed,
+        elapsed: elapsedNow,
         savedAt: Date.now(),
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -1228,6 +1521,8 @@
     state.hints = data.hints;
     state.hinted = new Set(data.hinted);
     state.elapsed = data.elapsed;
+    timerBase = state.elapsed;
+    timerAnchor = null;
     state.paused = false;
     state.completed = false;
     state.history = [];
@@ -1237,6 +1532,7 @@
     buildPad();
     updatePauseUI();
     renderAll();
+    startTimer();
     return true;
   }
 

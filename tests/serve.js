@@ -6,7 +6,8 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const PORT = Number(process.env.PORT || 8099);
+/* 只用专用变量，避免继承环境里无关的 PORT（例如其他开发服务器） */
+const PORT = Number(process.env.SUDOKU_PORT || 8099);
 const PREFIX = '/sudoku/';
 const TYPES = {
   '.html': 'text/html; charset=utf-8',

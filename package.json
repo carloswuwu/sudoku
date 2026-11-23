@@ -1,0 +1,17 @@
+{
+  "name": "sudoku",
+  "version": "1.0.0",
+  "private": true,
+  "description": "数独 · Sudoku — 可离线安装的 PWA 数独游戏",
+  "scripts": {
+    "test": "node tests/core.test.js && node tests/hints.test.js && node tests/sw.test.js && node tests/a11y.test.js && node tests/ui.test.js",
+    "test:core": "node tests/core.test.js",
+    "test:hints": "node tests/hints.test.js",
+    "test:sw": "node tests/sw.test.js",
+    "test:a11y": "node tests/a11y.test.js",
+    "test:ui": "node tests/ui.test.js",
+    "test:browser": "node tests/browser-qa.js",
+    "test:pwa": "node tests/pwa-qa.js",
+    "serve": "node tests/serve.js"
+  }
+}

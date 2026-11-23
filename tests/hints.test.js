@@ -212,12 +212,240 @@ function testRandomStates() {
   console.log('  随机盘面提示统计：' + JSON.stringify(techniques));
 }
 
+/* ------------------- 进阶技巧：直接构造候选数表测试 ------------------- */
+
+/* 构造一个 size×size 的候选数表，[] 表示该格已填或与本次技巧无关 */
+function candidateGrid(size) {
+  const map = [];
+  for (let r = 0; r < size; r++) {
+    const row = [];
+    for (let c = 0; c < size; c++) row.push([]);
+    map.push(row);
+  }
+  return map;
+}
+
+function hasElimination(hint, r, c, value) {
+  return hint.eliminations.some(function (item) {
+    return item.r === r && item.c === c && item.value === value;
+  });
+}
+
+function testPointingTechnique() {
+  const units = Hints.getUnits(9);
+
+  // 区块对：第 1 宫的 5 只出现在第 1 行的两个格子里
+  const candidates = candidateGrid(9);
+  candidates[0][0] = [2, 5];
+  candidates[0][1] = [3, 5];
+  candidates[0][3] = [5, 9]; // 第 1 行、宫外，应被排除 5 后只剩 9
+  const candidatesBefore = JSON.stringify(candidates);
+  const hint = Hints.findPointingHint(units, candidates, 9);
+  check(!!hint, '区块排除（对）：应找到提示');
+  if (hint) {
+    check(hint.type === 'pointing', '区块排除（对）：类型为 pointing');
+    check(hint.title === '区块排除', '区块排除（对）：标题正确');
+    check(hint.cell[0] === 0 && hint.cell[1] === 3, '区块排除（对）：目标格正确');
+    check(hint.value === 9, '区块排除（对）：排除后应填 9');
+    check(hasElimination(hint, 0, 3, 5), '区块排除（对）：排除了 r1c4 的候选数 5');
+    check(hint.eliminations.length === 1, '区块排除（对）：只排除一个候选数');
+    check(hint.pattern.indexOf('0:0') >= 0 && hint.pattern.indexOf('0:1') >= 0, '区块排除（对）：记录区块候选格');
+    check(hint.highlights.indexOf('0:0') >= 0 && hint.highlights.indexOf('0:1') >= 0, '区块排除（对）：高亮包含区块候选格');
+    check(hint.explanation.indexOf('宫') >= 0 && hint.explanation.indexOf('5') >= 0, '区块排除（对）：说明提到宫和数字');
+    check(hint.explanation.indexOf('只剩 9') >= 0, '区块排除（对）：说明给出结论');
+    check(JSON.stringify(candidates) === candidatesBefore, '区块排除（对）：不修改候选数表');
+  }
+
+  // 区块三：第 1 宫的 5 只出现在第 1 行的三个格子里
+  const triple = candidateGrid(9);
+  triple[0][0] = [2, 5];
+  triple[0][1] = [3, 5];
+  triple[0][2] = [4, 5];
+  triple[0][4] = [5, 9];
+  const tripleHint = Hints.findPointingHint(Hints.getUnits(9), triple, 9);
+  check(!!tripleHint, '区块排除（三）：应找到提示');
+  if (tripleHint) {
+    check(tripleHint.value === 9 && tripleHint.cell[0] === 0 && tripleHint.cell[1] === 4, '区块排除（三）：目标格正确');
+    check(hasElimination(tripleHint, 0, 4, 5), '区块排除（三）：排除了 r1c5 的候选数 5');
+    check(tripleHint.pattern.length === 3, '区块排除（三）：记录三个区块候选格');
+  }
+}
+
+function testClaimingTechnique() {
+  const units = Hints.getUnits(9);
+
+  // 行列排除：第 6 行的 7 只出现在左下宫内
+  const candidates = candidateGrid(9);
+  candidates[5][0] = [1, 7];
+  candidates[5][2] = [4, 7];
+  candidates[3][1] = [7, 8]; // 左下宫、第 6 行之外，应被排除 7 后只剩 8
+  const candidatesBefore = JSON.stringify(candidates);
+  const hint = Hints.findClaimingHint(units, candidates, 9);
+  check(!!hint, '行列排除：应找到提示');
+  if (hint) {
+    check(hint.type === 'claiming', '行列排除：类型为 claiming');
+    check(hint.title === '行列排除', '行列排除：标题正确');
+    check(hint.cell[0] === 3 && hint.cell[1] === 1, '行列排除：目标格正确');
+    check(hint.value === 8, '行列排除：排除后应填 8');
+    check(hasElimination(hint, 3, 1, 7), '行列排除：排除了 r4c2 的候选数 7');
+    check(hint.pattern.indexOf('5:0') >= 0 && hint.pattern.indexOf('5:2') >= 0, '行列排除：记录行内候选格');
+    check(hint.highlights.indexOf('5:0') >= 0 && hint.highlights.indexOf('5:2') >= 0, '行列排除：高亮包含行内候选格');
+    check(hint.explanation.indexOf('行') >= 0 && hint.explanation.indexOf('7') >= 0, '行列排除：说明提到行和数字');
+    check(JSON.stringify(candidates) === candidatesBefore, '行列排除：不修改候选数表');
+  }
+}
+
+function testXWingTechnique() {
+  // 行内矩形：数字 4 在第 2、7 行的候选位置都只在第 3、8 列
+  const rowMap = candidateGrid(9);
+  rowMap[1][2] = [1, 4];
+  rowMap[1][7] = [2, 4];
+  rowMap[6][2] = [3, 4];
+  rowMap[6][7] = [4, 5];
+  rowMap[3][2] = [4, 6]; // 第 4 行、第 3 列，应被排除 4 后只剩 6
+  const rowBefore = JSON.stringify(rowMap);
+  const rowHint = Hints.findXWingHint(Hints.getUnits(9), rowMap, 9);
+  check(!!rowHint, '矩形排除（行）：应找到提示');
+  if (rowHint) {
+    check(rowHint.type === 'x-wing', '矩形排除（行）：类型为 x-wing');
+    check(rowHint.title === '矩形排除', '矩形排除（行）：标题正确');
+    check(rowHint.cell[0] === 3 && rowHint.cell[1] === 2, '矩形排除（行）：目标格正确');
+    check(rowHint.value === 6, '矩形排除（行）：排除后应填 6');
+    check(hasElimination(rowHint, 3, 2, 4), '矩形排除（行）：排除了 r4c3 的候选数 4');
+    check(rowHint.pattern.length === 4, '矩形排除（行）：矩形四个角都要高亮');
+    check(
+      ['1:2', '1:7', '6:2', '6:7'].every(function (key) {
+        return rowHint.highlights.indexOf(key) >= 0;
+      }),
+      '矩形排除（行）：高亮包含矩形四角'
+    );
+    check(rowHint.explanation.indexOf('矩形') >= 0 && rowHint.explanation.indexOf('4') >= 0, '矩形排除（行）：说明提到矩形和数字');
+    check(JSON.stringify(rowMap) === rowBefore, '矩形排除（行）：不修改候选数表');
+  }
+
+  // 列内矩形：数字 6 在第 2、6 列的候选位置都只在第 3、9 行
+  const colMap = candidateGrid(9);
+  colMap[2][1] = [1, 6];
+  colMap[8][1] = [2, 6];
+  colMap[2][5] = [3, 6];
+  colMap[8][5] = [6, 7];
+  colMap[2][7] = [6, 9]; // 第 3 行、第 8 列，应被排除 6 后只剩 9
+  const colBefore = JSON.stringify(colMap);
+  const colHint = Hints.findXWingHint(Hints.getUnits(9), colMap, 9);
+  check(!!colHint, '矩形排除（列）：应找到提示');
+  if (colHint) {
+    check(colHint.cell[0] === 2 && colHint.cell[1] === 7, '矩形排除（列）：目标格正确');
+    check(colHint.value === 9, '矩形排除（列）：排除后应填 9');
+    check(hasElimination(colHint, 2, 7, 6), '矩形排除（列）：排除了 r3c8 的候选数 6');
+    check(JSON.stringify(colMap) === colBefore, '矩形排除（列）：不修改候选数表');
+  }
+}
+
+/* ------------------------- 难度分析（analyzeDifficulty） ------------------------- */
+
+/* 以下三个盘面由固定种子生成的 9×9 唯一解谜题雕刻而来，用于确定性的难度分层测试：
+ * TIER2 需要数对排除，TIER3 需要区块排除，TIER4 需要矩形排除。 */
+const TIER2_BOARD = [
+  [0, 3, 0, 9, 0, 0, 5, 1, 0],
+  [0, 0, 0, 8, 2, 0, 9, 0, 0],
+  [0, 0, 1, 0, 0, 6, 2, 0, 0],
+  [1, 0, 0, 0, 0, 0, 0, 4, 6],
+  [0, 0, 2, 7, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 5, 0, 6, 0, 0, 3, 0],
+  [3, 0, 4, 2, 0, 0, 0, 0, 0],
+  [0, 8, 0, 0, 0, 7, 0, 2, 0],
+];
+
+const TIER3_BOARD = [
+  [0, 2, 0, 0, 8, 0, 0, 0, 1],
+  [5, 0, 0, 7, 0, 0, 0, 6, 0],
+  [6, 0, 1, 2, 0, 0, 0, 0, 4],
+  [0, 0, 0, 0, 0, 0, 5, 0, 3],
+  [8, 1, 0, 0, 0, 5, 0, 0, 0],
+  [9, 6, 0, 0, 0, 0, 7, 0, 0],
+  [0, 3, 0, 0, 1, 0, 0, 0, 0],
+  [0, 0, 8, 0, 0, 0, 6, 0, 7],
+  [0, 0, 0, 0, 0, 3, 0, 0, 0],
+];
+
+const TIER4_BOARD = [
+  [0, 8, 0, 0, 0, 0, 3, 0, 9],
+  [4, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 7, 8, 0, 2],
+  [0, 1, 0, 7, 0, 0, 0, 0, 0],
+  [0, 4, 0, 0, 6, 0, 1, 0, 8],
+  [0, 0, 3, 0, 0, 5, 2, 0, 0],
+  [0, 9, 0, 0, 0, 0, 0, 0, 0],
+  [5, 0, 0, 1, 8, 6, 0, 0, 3],
+  [7, 0, 0, 0, 0, 0, 0, 8, 0],
+];
+
+function testAnalyzeDifficulty() {
+  // 1) 接近完成的盘面：只需要单数技巧
+  const solution = [
+    [1, 2, 3, 4],
+    [3, 4, 1, 2],
+    [2, 1, 4, 3],
+    [4, 3, 2, 1],
+  ];
+  const easyGrid = clone(solution);
+  easyGrid[0][0] = 0;
+  easyGrid[3][3] = 0;
+  const easyBefore = JSON.stringify(easyGrid);
+  const easy = Hints.analyzeDifficulty(easyGrid, 4);
+  check(easy.solved, '难度分析：接近完成的盘面应只用逻辑解开');
+  check(easy.maxTier === 1, '难度分析：只用单数技巧时 maxTier 为 1');
+  check(easy.remaining === 0, '难度分析：解开后剩余 0 格');
+  check((easy.techniques['naked-single'] || 0) > 0, '难度分析：统计到唯一候选数');
+  check(JSON.stringify(easyGrid) === easyBefore, '难度分析：不修改接近完成的输入棋盘');
+
+  // 2) 需要排除类技巧的盘面：难度层级应提高
+  const tiers = [
+    { name: '数对', board: TIER2_BOARD, tier: 2, technique: 'naked-pair' },
+    { name: '区块', board: TIER3_BOARD, tier: 3, technique: 'pointing' },
+    { name: '矩形', board: TIER4_BOARD, tier: 4, technique: 'x-wing' },
+  ];
+  tiers.forEach(function (item) {
+    const before = JSON.stringify(item.board);
+    const result = Hints.analyzeDifficulty(item.board, 9);
+    check(result.solved, '难度分析：' + item.name + '盘面应能被逻辑解开');
+    check(
+      result.maxTier === item.tier,
+      '难度分析：' + item.name + '盘面 maxTier 应为 ' + item.tier + '（实际 ' + result.maxTier + '）'
+    );
+    check(result.remaining === 0, '难度分析：' + item.name + '盘面解开后剩余 0 格');
+    check(
+      (result.techniques[item.technique] || 0) > 0,
+      '难度分析：' + item.name + '盘面应使用 ' + item.technique
+    );
+    check(JSON.stringify(item.board) === before, '难度分析：不修改输入棋盘（' + item.name + '）');
+  });
+
+  // 3) 逻辑无法解开的盘面
+  const empty = Core.emptyGrid(9);
+  const stuck = Hints.analyzeDifficulty(empty, 9);
+  check(!stuck.solved, '难度分析：空盘无法只用逻辑解开');
+  check(stuck.maxTier === 0, '难度分析：空盘没有用到任何技巧');
+  check(stuck.remaining === 81, '难度分析：空盘剩余 81 格');
+  check(Object.keys(stuck.techniques).length === 0, '难度分析：空盘技巧统计为空');
+
+  // 4) 确定性：同一盘面重复分析结果一致
+  const first = JSON.stringify(Hints.analyzeDifficulty(TIER4_BOARD, 9));
+  const second = JSON.stringify(Hints.analyzeDifficulty(TIER4_BOARD, 9));
+  check(first === second, '难度分析：同一盘面分析结果确定');
+}
+
 console.log('数独逻辑提示引擎测试');
 testNakedSingle();
 testHiddenSingleRow();
 testConflictAndInvalid();
 testNakedPairTechnique();
 testContradictionTechnique();
+testPointingTechnique();
+testClaimingTechnique();
+testXWingTechnique();
+testAnalyzeDifficulty();
 testSolveWithHints();
 testRandomStates();
 console.log('\n全部通过 ✓  (' + checks + ' 项断言)');
