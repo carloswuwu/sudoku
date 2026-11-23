@@ -466,6 +466,57 @@ async function main() {
     ok((await evaluate('document.getElementById("modeBadge").textContent')) === '9×9 · 中等', '模式徽章为 9×9 · 中等');
     report.screenshots.push(await screenshot('browser-9x9.png'));
 
+    console.log('\n[我的记录]');
+    const recordsInfo = await evaluate(`(() => {
+      __qa.click(document.getElementById('recordsBtn'));
+      const saved = JSON.parse(localStorage.getItem('sudoku-records-v1') || '[]');
+      return {
+        modalVisible: !document.getElementById('recordsModal').hidden,
+        savedCount: saved.length,
+        items: document.querySelectorAll('#recordList .record-item').length,
+        summary: document.getElementById('recordSummary').textContent,
+        hasBest: document.querySelectorAll('#recordBests .record-best-row span.is-best').length,
+        recordText: document.getElementById('recordList').textContent
+      };
+    })()`);
+    ok(recordsInfo.modalVisible, '我的记录弹窗打开');
+    ok(recordsInfo.savedCount === 1 && recordsInfo.items === 1, '完成一局后记录被保存并展示（' + recordsInfo.savedCount + '/' + recordsInfo.items + '）');
+    ok(recordsInfo.summary.indexOf('1 局') >= 0, '记录概览显示完成局数');
+    ok(recordsInfo.hasBest >= 1, '最佳成绩显示完成时间');
+    ok(recordsInfo.recordText.indexOf('4×4 · 简单') >= 0, '记录条目显示棋盘模式');
+    await wait(200);
+    report.screenshots.push(await screenshot('browser-records.png'));
+    await evaluate('__qa.click(document.querySelector("#recordsModal .js-cancel-records"))');
+    ok(await evaluate('document.getElementById("recordsModal").hidden'), '记录弹窗可关闭');
+
+    console.log('\n[设置：切换深色外观]');
+    await evaluate('__qa.click(document.getElementById("settingsBtn"))');
+    await waitFor('!document.getElementById("settingsModal").hidden', 4000);
+    ok((await evaluate('document.querySelectorAll(".theme-card").length')) === 3, '设置弹窗包含 3 个外观选项');
+    await evaluate('__qa.click(document.querySelector(\'.theme-card[data-theme-mode="dark"]\'))');
+    await wait(350);
+    const themeInfo = await evaluate(`(() => ({
+      theme: document.documentElement.getAttribute('data-theme'),
+      mode: document.documentElement.getAttribute('data-theme-mode'),
+      bodyBg: getComputedStyle(document.body).backgroundColor,
+      stored: localStorage.getItem('sudoku-theme-v1'),
+      pressed: document.querySelector('.theme-card[data-theme-mode="dark"]').getAttribute('aria-pressed')
+    }))()`);
+    ok(themeInfo.theme === 'dark' && themeInfo.mode === 'dark', '选择深色后立即应用');
+    ok(themeInfo.bodyBg === 'rgb(0, 0, 0)', '深色主题背景为黑色（实际 ' + themeInfo.bodyBg + '）');
+    ok(themeInfo.stored === 'dark', '主题选择写入 localStorage');
+    ok(themeInfo.pressed === 'true', '深色选项 aria-pressed=true');
+    report.screenshots.push(await screenshot('browser-settings-dark.png'));
+    await evaluate('__qa.click(document.querySelector(\'.theme-card[data-theme-mode="auto"]\'))');
+    await wait(350);
+    const backToAuto = await evaluate(`(() => ({
+      mode: document.documentElement.getAttribute('data-theme-mode'),
+      stored: localStorage.getItem('sudoku-theme-v1')
+    }))()`);
+    ok(backToAuto.mode === 'auto' && backToAuto.stored === 'auto', '可以切回跟随系统外观');
+    await evaluate('__qa.click(document.querySelector("#settingsModal .js-cancel-settings"))');
+    ok(await evaluate('document.getElementById("settingsModal").hidden'), '设置弹窗可关闭');
+
     console.log('\n[真实浏览器：刷新后恢复进度]');
     const savedCell = await evaluate(`(() => {
       const c = __qa.firstEmpty();

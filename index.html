@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="一个简洁优雅的数独游戏，支持 4×4、6×6、9×9 三种棋盘与简单/中等/困难三个难度。">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f2f3f7" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" id="themeColor" content="#f2f3f7">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,6 +13,24 @@
   <title>数独 · Sudoku</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230066cc'/%3E%3Cg stroke='white' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M6 14.5h20M6 21.5h20M14.5 6v20M21.5 6v20'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <script>
+    /* 在样式表加载前恢复主题，避免深色模式闪白 */
+    (function () {
+      var mode = 'auto';
+      try {
+        var stored = window.localStorage.getItem('sudoku-theme-v1');
+        if (stored === 'light' || stored === 'dark' || stored === 'auto') mode = stored;
+      } catch (err) { /* 隐私模式下忽略 */ }
+      var dark = mode === 'dark';
+      if (mode === 'auto' && window.matchMedia) {
+        dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme-mode', mode);
+      var meta = document.getElementById('themeColor');
+      if (meta) meta.setAttribute('content', dark ? '#000000' : '#f2f3f7');
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -39,12 +56,25 @@
         </div>
         <p class="subtitle" id="modeBadge">9×9 · 中等</p>
       </div>
-      <button class="btn btn-primary btn-small" id="newGameBtn" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-          <path d="M12 5v14M5 12h14"></path>
-        </svg>
-        新游戏
-      </button>
+      <div class="topbar-actions">
+        <button class="icon-btn topbar-icon" id="recordsBtn" type="button" title="我的记录" aria-label="我的记录">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 20V10M10 20V4M16 20v-6M22 20H2"></path>
+          </svg>
+        </button>
+        <button class="icon-btn topbar-icon" id="settingsBtn" type="button" title="设置" aria-label="设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.1"></circle>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"></path>
+          </svg>
+        </button>
+        <button class="btn btn-primary btn-small" id="newGameBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"></path>
+          </svg>
+          新游戏
+        </button>
+      </div>
     </header>
 
     <main class="app-main">
@@ -254,6 +284,96 @@
       <div class="modal-actions">
         <button class="btn btn-secondary js-cancel-restart" id="restartCancelBtn" type="button">取消</button>
         <button class="btn btn-primary" id="restartConfirmBtn" type="button">重新开始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" aria-describedby="settingsDesc">
+      <div class="modal-head">
+        <div>
+          <h2 id="settingsTitle">设置</h2>
+          <p class="modal-sub" id="settingsDesc">外观与本地数据</p>
+        </div>
+        <button class="close-btn js-cancel-settings" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+        </button>
+      </div>
+
+      <p class="modal-section-title">外观</p>
+      <div class="theme-options" id="themeOptions" role="group" aria-label="外观主题">
+        <button class="theme-card" type="button" data-theme-mode="auto" aria-pressed="true">
+          <span class="theme-preview theme-preview-auto" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="6.6" fill="#ffffff" stroke="rgba(60,60,67,0.35)" stroke-width="1"></circle>
+              <path d="M12 5.4a6.6 6.6 0 0 1 0 13.2Z" fill="#1c1c1e"></path>
+            </svg>
+          </span>
+          <strong>跟随系统</strong>
+          <span>随系统自动切换</span>
+        </button>
+        <button class="theme-card" type="button" data-theme-mode="light" aria-pressed="false">
+          <span class="theme-preview theme-preview-light" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f5a623" stroke-width="1.7" stroke-linecap="round">
+              <circle cx="12" cy="12" r="3.6" fill="#f5a623" stroke="none"></circle>
+              <path d="M12 3.2v2M12 18.8v2M3.2 12h2M18.8 12h2M5.8 5.8l1.4 1.4M16.8 16.8l1.4 1.4M18.2 5.8l-1.4 1.4M7.2 16.8l-1.4 1.4"></path>
+            </svg>
+          </span>
+          <strong>浅色</strong>
+          <span>始终使用浅色</span>
+        </button>
+        <button class="theme-card" type="button" data-theme-mode="dark" aria-pressed="false">
+          <span class="theme-preview theme-preview-dark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M20.2 14.8A8.4 8.4 0 0 1 9.2 3.8a8.5 8.5 0 1 0 11 11Z" fill="#4da3ff"></path>
+            </svg>
+          </span>
+          <strong>深色</strong>
+          <span>始终使用深色</span>
+        </button>
+      </div>
+      <p class="settings-note">主题、游戏进度和记录都只保存在这台设备上，不会上传。</p>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary js-cancel-settings" type="button">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 我的记录弹窗 -->
+  <div class="modal-backdrop" id="recordsModal" hidden>
+    <div class="modal modal-records" role="dialog" aria-modal="true" aria-labelledby="recordsTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="recordsTitle">我的记录</h2>
+          <p class="modal-sub">只保存在这台设备上</p>
+        </div>
+        <button class="close-btn js-cancel-records" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="record-summary" id="recordSummary"></div>
+      <p class="record-empty" id="recordEmpty" hidden>还没有完成记录。完成一局数独后，成绩会自动保存在这里。</p>
+
+      <section class="record-section" id="recordBestSection">
+        <p class="modal-section-title">最佳成绩</p>
+        <div class="record-bests" id="recordBests"></div>
+      </section>
+
+      <section class="record-section" id="recordListSection">
+        <p class="modal-section-title">最近完成</p>
+        <ul class="record-list" id="recordList"></ul>
+      </section>
+
+      <div class="modal-actions record-actions">
+        <button class="btn btn-secondary" id="clearRecordsBtn" type="button">清空记录</button>
+        <button class="btn btn-primary js-cancel-records" type="button">完成</button>
       </div>
     </div>
   </div>

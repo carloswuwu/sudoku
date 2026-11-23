@@ -9,6 +9,10 @@
   var Hints = window.SudokuHints;
   var STORAGE_KEY = 'sudoku-save-v1';
   var CONFIG_KEY = 'sudoku-last-config-v1';
+  var THEME_KEY = 'sudoku-theme-v1';
+  var RECORDS_KEY = 'sudoku-records-v1';
+  var THEME_MODES = ['auto', 'light', 'dark'];
+  var MAX_RECORDS = 200;
   var DIFFICULTY_LABEL = { easy: '简单', medium: '中等', hard: '困难' };
   var DIFFICULTY_DESC = {
     easy: '提示较多，只需唯一候选数即可推出。',
@@ -35,6 +39,7 @@
     elapsed: 0,
     paused: false,
     completed: false,
+    recorded: false,
     history: [],
   };
 
@@ -54,6 +59,12 @@
   var winReturnFocus = null;
   var pauseReturnFocus = null;
   var restartReturnFocus = null;
+  var settingsReturnFocus = null;
+  var recordsReturnFocus = null;
+  var themeMode = 'auto';
+  var themeMedia = null;
+  var records = [];
+  var clearRecordsArmed = false;
 
   /* ------------------------------------------------------------------ */
   /* 基础工具                                                            */
@@ -219,11 +230,319 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 外观主题（跟随系统 / 浅色 / 深色）                                    */
+  /* ------------------------------------------------------------------ */
+
+  function loadThemeMode() {
+    try {
+      var stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
+    } catch (err) {
+      /* 忽略存储失败 */
+    }
+    return 'auto';
+  }
+
+  function resolvedTheme(mode) {
+    if (mode === 'light' || mode === 'dark') return mode;
+    return themeMedia && themeMedia.matches ? 'dark' : 'light';
+  }
+
+  function syncThemeUI() {
+    if (!dom.themeOptions) return;
+    var cards = dom.themeOptions.querySelectorAll('[data-theme-mode]');
+    Array.prototype.forEach.call(cards, function (card) {
+      var active = card.getAttribute('data-theme-mode') === themeMode;
+      card.classList.toggle('selected', active);
+      card.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+  function applyTheme(mode, persist) {
+    themeMode = mode;
+    var resolved = resolvedTheme(mode);
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-mode', mode);
+    var meta = document.getElementById('themeColor');
+    if (meta) meta.setAttribute('content', resolved === 'dark' ? '#000000' : '#f2f3f7');
+    if (persist) {
+      try {
+        localStorage.setItem(THEME_KEY, mode);
+      } catch (err) {
+        /* 忽略存储失败 */
+      }
+    }
+    syncThemeUI();
+  }
+
+  function onSystemThemeChange() {
+    if (themeMode === 'auto') applyTheme('auto', false);
+  }
+
+  function bindSystemTheme() {
+    if (!themeMedia) return;
+    if (typeof themeMedia.addEventListener === 'function') {
+      themeMedia.addEventListener('change', onSystemThemeChange);
+    } else if (typeof themeMedia.addListener === 'function') {
+      themeMedia.addListener(onSystemThemeChange);
+    }
+  }
+
+  function onThemeCardClick(event) {
+    var card = event.target.closest ? event.target.closest('[data-theme-mode]') : null;
+    if (!card) return;
+    var mode = card.getAttribute('data-theme-mode');
+    if (THEME_MODES.indexOf(mode) < 0) return;
+    applyTheme(mode, true);
+  }
+
+  function openSettingsModal() {
+    settingsReturnFocus = activeElementOrNull();
+    if (dom.app) dom.app.inert = true;
+    syncThemeUI();
+    dom.settingsModal.hidden = false;
+    var selected = dom.themeOptions.querySelector('.theme-card.selected');
+    focusAfterRender(selected || dom.settingsModal.querySelector('.close-btn'));
+  }
+
+  function closeSettingsModal() {
+    if (dom.settingsModal.hidden) return;
+    dom.settingsModal.hidden = true;
+    if (dom.app) dom.app.inert = false;
+    restoreFocus(settingsReturnFocus || dom.settingsBtn);
+    settingsReturnFocus = null;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 我的记录（仅保存在本机）                                             */
+  /* ------------------------------------------------------------------ */
+
+  function loadRecords() {
+    try {
+      var raw = localStorage.getItem(RECORDS_KEY);
+      if (!raw) return [];
+      var data = JSON.parse(raw);
+      if (!Array.isArray(data)) return [];
+      var out = [];
+      for (var i = 0; i < data.length; i++) {
+        var item = data[i];
+        if (!item || [4, 6, 9].indexOf(item.size) < 0) continue;
+        if (!DIFFICULTY_LABEL[item.difficulty]) continue;
+        if (typeof item.elapsed !== 'number' || !isFinite(item.elapsed) || item.elapsed < 0) continue;
+        out.push({
+          size: item.size,
+          difficulty: item.difficulty,
+          elapsed: Math.floor(item.elapsed),
+          mistakes: Number.isInteger(item.mistakes) && item.mistakes >= 0 ? item.mistakes : 0,
+          hints: Number.isInteger(item.hints) && item.hints >= 0 ? item.hints : 0,
+          completedAt: typeof item.completedAt === 'number' && isFinite(item.completedAt) ? item.completedAt : 0,
+        });
+      }
+      return out.slice(Math.max(0, out.length - MAX_RECORDS));
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function saveRecords() {
+    try {
+      localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
+    } catch (err) {
+      /* 忽略存储失败 */
+    }
+  }
+
+  function addRecord() {
+    if (state.recorded) return;
+    state.recorded = true;
+    records.push({
+      size: state.size,
+      difficulty: state.difficulty,
+      elapsed: Math.max(0, Math.floor(state.elapsed)),
+      mistakes: state.mistakes,
+      hints: state.hints,
+      completedAt: Date.now(),
+    });
+    if (records.length > MAX_RECORDS) records = records.slice(records.length - MAX_RECORDS);
+    saveRecords();
+  }
+
+  function formatRecordDate(timestamp) {
+    if (!timestamp) return '';
+    var date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    function pad(num) {
+      return num < 10 ? '0' + num : String(num);
+    }
+    return (
+      pad(date.getMonth() + 1) + '/' + pad(date.getDate()) + ' ' +
+      pad(date.getHours()) + ':' + pad(date.getMinutes())
+    );
+  }
+
+  function createRecordStat(label, value) {
+    var box = document.createElement('div');
+    box.className = 'record-stat';
+    var name = document.createElement('span');
+    name.textContent = label;
+    var strong = document.createElement('strong');
+    strong.textContent = value;
+    box.appendChild(name);
+    box.appendChild(strong);
+    return box;
+  }
+
+  function recordKey(size, difficulty) {
+    return size + ':' + difficulty;
+  }
+
+  function resetClearRecords() {
+    clearRecordsArmed = false;
+    if (!dom.clearRecordsBtn) return;
+    dom.clearRecordsBtn.textContent = '清空记录';
+    dom.clearRecordsBtn.classList.remove('is-danger');
+    dom.clearRecordsBtn.setAttribute('aria-label', '清空所有记录');
+  }
+
+  function renderRecords() {
+    if (!dom.recordSummary) return;
+    var total = records.length;
+    var best = null;
+    var sum = 0;
+    var hintSum = 0;
+    var bestMap = {};
+    for (var i = 0; i < total; i++) {
+      var item = records[i];
+      if (best === null || item.elapsed < best) best = item.elapsed;
+      sum += item.elapsed;
+      hintSum += item.hints;
+      var key = recordKey(item.size, item.difficulty);
+      if (!bestMap[key] || item.elapsed < bestMap[key]) bestMap[key] = item.elapsed;
+    }
+
+    dom.recordSummary.textContent = '';
+    dom.recordSummary.appendChild(createRecordStat('完成局数', total ? total + ' 局' : '0 局'));
+    dom.recordSummary.appendChild(createRecordStat('最佳用时', total ? formatTime(best) : '—'));
+    dom.recordSummary.appendChild(createRecordStat('平均用时', total ? formatTime(Math.round(sum / total)) : '—'));
+    dom.recordSummary.appendChild(createRecordStat('累计提示', total ? String(hintSum) : '—'));
+
+    var isEmpty = total === 0;
+    dom.recordEmpty.hidden = !isEmpty;
+    dom.recordBestSection.hidden = isEmpty;
+    dom.recordListSection.hidden = isEmpty;
+    dom.recordBests.textContent = '';
+    dom.recordList.textContent = '';
+    dom.clearRecordsBtn.disabled = isEmpty;
+
+    if (isEmpty) {
+      resetClearRecords();
+      return;
+    }
+
+    var sizes = [4, 6, 9];
+    var difficulties = ['easy', 'medium', 'hard'];
+    var head = document.createElement('div');
+    head.className = 'record-best-row record-best-head';
+    var headLabels = ['棋盘', '简单', '中等', '困难'];
+    for (var h = 0; h < headLabels.length; h++) {
+      var label = document.createElement('span');
+      label.textContent = headLabels[h];
+      head.appendChild(label);
+    }
+    dom.recordBests.appendChild(head);
+
+    for (var s = 0; s < sizes.length; s++) {
+      var row = document.createElement('div');
+      row.className = 'record-best-row';
+      var sizeLabel = document.createElement('span');
+      sizeLabel.textContent = sizes[s] + '×' + sizes[s];
+      row.appendChild(sizeLabel);
+      for (var d = 0; d < difficulties.length; d++) {
+        var time = bestMap[recordKey(sizes[s], difficulties[d])];
+        var timeCell = document.createElement('span');
+        if (time === undefined) {
+          timeCell.textContent = '—';
+          timeCell.classList.add('is-empty');
+        } else {
+          timeCell.textContent = formatTime(time);
+          timeCell.classList.add('is-best');
+        }
+        row.appendChild(timeCell);
+      }
+      dom.recordBests.appendChild(row);
+    }
+
+    var recent = records.slice().reverse().slice(0, 30);
+    for (var r = 0; r < recent.length; r++) {
+      var record = recent[r];
+      var li = document.createElement('li');
+      li.className = 'record-item';
+
+      var main = document.createElement('div');
+      main.className = 'record-main';
+      var mode = document.createElement('span');
+      mode.className = 'record-mode';
+      mode.textContent = record.size + '×' + record.size + ' · ' + DIFFICULTY_LABEL[record.difficulty];
+      var meta = document.createElement('span');
+      meta.className = 'record-meta';
+      var dateText = formatRecordDate(record.completedAt);
+      meta.textContent = '错误 ' + record.mistakes + ' · 提示 ' + record.hints + (dateText ? ' · ' + dateText : '');
+      main.appendChild(mode);
+      main.appendChild(meta);
+
+      var timeEl = document.createElement('strong');
+      timeEl.className = 'record-time';
+      timeEl.textContent = formatTime(record.elapsed);
+
+      li.appendChild(main);
+      li.appendChild(timeEl);
+      dom.recordList.appendChild(li);
+    }
+    resetClearRecords();
+  }
+
+  function onClearRecordsClick() {
+    if (!records.length) return;
+    if (!clearRecordsArmed) {
+      clearRecordsArmed = true;
+      dom.clearRecordsBtn.textContent = '再点一次清空';
+      dom.clearRecordsBtn.classList.add('is-danger');
+      dom.clearRecordsBtn.setAttribute('aria-label', '再次点击确认清空所有记录');
+      return;
+    }
+    records = [];
+    saveRecords();
+    renderRecords();
+    toast('记录已清空');
+  }
+
+  function openRecordsModal() {
+    recordsReturnFocus = activeElementOrNull();
+    if (dom.app) dom.app.inert = true;
+    renderRecords();
+    dom.recordsModal.hidden = false;
+    focusAfterRender(dom.recordsModal.querySelector('.close-btn'));
+  }
+
+  function closeRecordsModal() {
+    if (dom.recordsModal.hidden) return;
+    dom.recordsModal.hidden = true;
+    if (dom.app) dom.app.inert = false;
+    restoreFocus(recordsReturnFocus || dom.recordsBtn);
+    recordsReturnFocus = null;
+    resetClearRecords();
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 初始化                                                              */
   /* ------------------------------------------------------------------ */
 
   function init() {
     cacheDom();
+    themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    applyTheme(loadThemeMode(), false);
+    records = loadRecords();
+    bindSystemTheme();
     buildMiniGrids();
     bindEvents();
     setupPwa();
@@ -293,6 +612,18 @@
     dom.hintTitle = $('hintTitle');
     dom.hintText = $('hintText');
     dom.hintClose = $('hintClose');
+    dom.settingsBtn = $('settingsBtn');
+    dom.recordsBtn = $('recordsBtn');
+    dom.settingsModal = $('settingsModal');
+    dom.themeOptions = $('themeOptions');
+    dom.recordsModal = $('recordsModal');
+    dom.recordSummary = $('recordSummary');
+    dom.recordEmpty = $('recordEmpty');
+    dom.recordBestSection = $('recordBestSection');
+    dom.recordListSection = $('recordListSection');
+    dom.recordBests = $('recordBests');
+    dom.recordList = $('recordList');
+    dom.clearRecordsBtn = $('clearRecordsBtn');
   }
 
   /* PWA：仅在 HTTPS / localhost 下挂载 manifest 并注册 Service Worker（file:// 下跳过） */
@@ -416,6 +747,24 @@
       if (event.target === dom.restartModal) closeRestartConfirm();
     });
 
+    dom.settingsBtn.addEventListener('click', openSettingsModal);
+    dom.recordsBtn.addEventListener('click', openRecordsModal);
+    if (dom.themeOptions) dom.themeOptions.addEventListener('click', onThemeCardClick);
+    if (dom.clearRecordsBtn) dom.clearRecordsBtn.addEventListener('click', onClearRecordsClick);
+
+    Array.prototype.forEach.call(document.querySelectorAll('.js-cancel-settings'), function (btn) {
+      btn.addEventListener('click', closeSettingsModal);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.js-cancel-records'), function (btn) {
+      btn.addEventListener('click', closeRecordsModal);
+    });
+    dom.settingsModal.addEventListener('click', function (event) {
+      if (event.target === dom.settingsModal) closeSettingsModal();
+    });
+    dom.recordsModal.addEventListener('click', function (event) {
+      if (event.target === dom.recordsModal) closeRecordsModal();
+    });
+
     dom.playAgainBtn.addEventListener('click', function () {
       hideWin();
       startNewGame(state.size, state.difficulty);
@@ -490,7 +839,26 @@
   }
 
   function onKeydown(event) {
-    /* 重玩确认弹窗优先于其他弹窗处理 */
+    /* 设置 / 记录弹窗优先于其他弹窗处理 */
+    if (!dom.settingsModal.hidden) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSettingsModal();
+        return;
+      }
+      trapTab(dom.settingsModal, event);
+      return;
+    }
+    if (!dom.recordsModal.hidden) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeRecordsModal();
+        return;
+      }
+      trapTab(dom.recordsModal, event);
+      return;
+    }
+    /* 重玩确认弹窗 */
     if (!dom.restartModal.hidden) {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -1103,6 +1471,7 @@
   }
 
   function checkCompletion() {
+    if (state.completed) return false;
     var n = state.size;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
@@ -1113,6 +1482,7 @@
     if (Core.findConflicts(state.values, n).size > 0) return false;
     state.completed = true;
     pauseTimer();
+    addRecord();
     state.paused = false;
     updatePauseUI();
     renderAll();
@@ -1221,6 +1591,7 @@
     state.notesMode = false;
     state.paused = false;
     state.completed = false;
+    state.recorded = false;
     resetHint();
     updatePauseUI();
     renderAll();
@@ -1316,6 +1687,7 @@
     resetTimer();
     state.paused = false;
     state.completed = false;
+    state.recorded = false;
     state.history = [];
 
     hideWin();
@@ -1525,6 +1897,7 @@
     timerAnchor = null;
     state.paused = false;
     state.completed = false;
+    state.recorded = false;
     state.history = [];
 
     dom.pauseOverlay.hidden = true;

@@ -64,9 +64,26 @@
 
 ![逻辑提示截图](hint-screenshot.png)
 
+## 设置与记录
+
+右上角有「我的记录」和「设置」两个入口：
+
+- **外观设置**：可以随时在「跟随系统 / 浅色 / 深色」之间切换，立即生效并保存在本机；选择「跟随系统」时会随系统深色模式自动变化，刷新页面也不会闪回默认主题。
+- **我的记录**：每完成一局会自动保存成绩（棋盘尺寸、难度、用时、错误数、提示数、完成时间），并汇总：
+  - 完成局数、最佳用时、平均用时、累计提示；
+  - 三种棋盘 × 三种难度的最佳成绩表；
+  - 最近完成的成绩列表；
+  - 「清空记录」需要点两次确认，避免误删。
+
+主题、进度和记录都只保存在浏览器本地（`localStorage`），不会上传到服务器。
+
+![我的记录截图](records-screenshot.png)
+![外观设置截图](settings-screenshot.png)
+
 ## 功能特点
 
-- 简洁的 Apple 风格界面，自动跟随系统浅色 / 深色模式，手机、平板、电脑都适配；文字与按键对比度按 WCAG AA 校准。
+- 简洁的 Apple 风格界面，支持跟随系统 / 浅色 / 深色三种外观，手机、平板、电脑都适配；文字与按键对比度按 WCAG AA 校准。
+- **我的记录**：本机保存每局成绩、最佳成绩与最近完成列表，支持两步确认清空。
 - **PWA 支持**：可安装到桌面 / 主屏幕，独立窗口运行，并支持离线游玩。
 - 三种棋盘尺寸 × 三种难度，全部由程序随机生成，**保证每道题只有唯一解**，并按实际推理技巧校验难度。
 - **逻辑提示**：每一步都说明推理依据，配合高亮和动画，而不是简单公布答案；覆盖唯一候选、行列宫唯一、数对排除、区块 / 行列排除、矩形排除与反证法。
@@ -106,6 +123,8 @@
 | `package.json` | 开发脚本（`npm test` / `npm run serve`） |
 | `screenshot.png` | 游戏截图 |
 | `hint-screenshot.png` | 逻辑提示截图 |
+| `records-screenshot.png` | 我的记录截图 |
+| `settings-screenshot.png` | 外观设置截图 |
 | `tests/` | 开发测试（普通玩家不需要） |
 
 ## 开发与测试
@@ -124,6 +143,7 @@ node tests/core.test.js
 node tests/hints.test.js
 node tests/sw.test.js
 node tests/a11y.test.js
+node tests/records.test.js
 node tests/ui.test.js
 ```
 
@@ -145,6 +165,7 @@ npm run serve
 - `tests/hints.test.js` 覆盖唯一候选、行/列/宫唯一、数对排除、区块 / 行列排除、矩形排除、反证法与难度分析，并验证从空盘只用提示即可完成三种尺寸 × 三种难度。
 - `tests/sw.test.js` 用桩执行 Service Worker，验证预缓存、只清理本应用缓存、在线写入缓存与离线回退。
 - `tests/a11y.test.js` 从 `style.css` 读取设计令牌，校验关键前景 / 背景组合达到 WCAG AA 对比度。
+- `tests/records.test.js` 用 jsdom 验证外观设置（跟随系统 / 浅色 / 深色、持久化、系统主题变化）与「我的记录」（完成写入、统计、最佳成绩、两步清空、损坏数据容错）。
 - `tests/ui.test.js` 用 jsdom 验证点击 / 键盘操作、冲突标红、提示、撤销、笔记、暂停、重玩确认、胜利流程，以及刷新后从 `localStorage` 恢复进度。
-- `tests/browser-qa.js` 用无头 Edge 模拟真实操作并输出桌面 / 平板 / 手机 / 深色模式截图。
+- `tests/browser-qa.js` 用无头 Edge 模拟真实操作并输出桌面 / 平板 / 手机 / 深色模式 / 设置 / 记录截图。
 - `tests/pwa-qa.js` 默认在本地启动静态服务器检查 PWA 清单、Service Worker、安装条件，并模拟断网重新加载验证离线可用；也可通过 `PWA_URL` 检查线上版。
